@@ -475,6 +475,7 @@ export function mapSapSupplierInvoice(record) {
         'invalid_data',
       )
     }
+    const grossAmount = toNullableAmount(record.InvoiceGrossAmount)
     return {
       id: `${record.SupplierInvoice}_${record.FiscalYear}`,
       supplierId: toNullableString(record.InvoicingParty),
@@ -487,7 +488,8 @@ export function mapSapSupplierInvoice(record) {
       documentDate: toSapDate(record.DocumentDate),
       postingDate: toSapDate(record.PostingDate),
       dueDate: null,
-      amount: toNullableAmount(record.InvoiceGrossAmount),
+      amount: grossAmount,
+      grossAmount,
       currency: toNullableString(record.DocumentCurrency),
       paymentStatus: null,
       invoiceProcessingStatus: toNullableString(record.SupplierInvoiceStatus),
@@ -804,9 +806,11 @@ export async function getSapPaymentSummary(filters = {}, options = {}) {
       upcomingObligationAmountByCurrency: summary.metricStatus.upcomingPaymentObligations === 'available' ? currencyTotals(summary.amounts.upcomingByCurrency) : {},
       completedPaymentAmountByCurrency: {},
       outstandingItemCount: summary.metricStatus.outstandingItems === 'available' ? summary.counts.outstandingItems : null,
-      overdueItemCount: summary.metricStatus.overdueAmount === 'available' ? summary.counts.overdueItems : null,
+      overdueItemCount: summary.metricStatus.overdueItems === 'available' ? summary.counts.overdueItems : null,
       upcomingObligationCount: summary.metricStatus.upcomingPaymentObligations === 'available' ? summary.counts.upcomingItems : null,
       completedPaymentCount: summary.metricStatus.completedPayments === 'available' ? summary.counts.completedPayments : null,
+      suppliersWithOutstandingBalances: summary.metricStatus.suppliersWithOutstandingBalances === 'available' ? summary.counts.suppliersWithOutstandingBalances : null,
+      clearedAccountingItems: summary.metricStatus.clearedAccountingItems === 'available' ? summary.counts.clearedAccountingItems : null,
       invoiceCount: filteredRecords.length,
       companyCodes: [...companyCodes].sort(),
       companyCodeCount: companyCodes.size,

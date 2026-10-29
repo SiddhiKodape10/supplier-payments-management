@@ -275,6 +275,28 @@ test('verified supplier invoice OData response maps confirmed fields and escapes
   }
 })
 
+test('live SAP invoice mapping exposes invoice gross amount separately from open-item balances', () => {
+  const record = mapSapSupplierInvoice({
+    SupplierInvoice: '5100001234',
+    FiscalYear: '2025',
+    CompanyCode: '1000',
+    InvoicingParty: '0000100024',
+    SupplierInvoiceIDByInvcgParty: 'INV-2048',
+    InvoiceGrossAmount: '215.50',
+    DocumentCurrency: 'USD',
+    SupplierInvoiceStatus: '5',
+    PaymentReference: 'PAY-REF-1',
+  })
+
+  assert.equal(record.amount, 215.5)
+  assert.equal(record.grossAmount, 215.5)
+  assert.equal(record.currency, 'USD')
+  assert.equal(record.invoiceReference, 'INV-2048')
+  assert.equal(record.paymentStatus, null)
+  assert.equal(record.dueDate, null)
+  assert.equal(record.dataMode, 'live')
+})
+
 test('SAP invoice mapper rejects missing keys and leaves unverified values unavailable', () => {
   assert.throws(() => mapSapSupplierInvoice({ SupplierInvoice: '5100001234' }), {
     statusCode: 502,
@@ -286,6 +308,7 @@ test('SAP invoice mapper rejects missing keys and leaves unverified values unava
   })
   assert.equal(record.supplierName, null)
   assert.equal(record.amount, null)
+  assert.equal(record.grossAmount, null)
   assert.equal(record.currency, null)
   assert.equal(record.dueDate, null)
   assert.equal(record.paymentStatus, null)

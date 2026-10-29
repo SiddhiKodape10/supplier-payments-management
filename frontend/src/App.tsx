@@ -94,7 +94,7 @@ function formatCurrencyTotals(totals: Record<string, number> | undefined) {
 }
 
 function formatMetricValue(
-  metricKey: 'totalOutstandingAmount' | 'overdueAmount' | 'upcomingPaymentObligations' | 'completedPayments' | 'outstandingItems',
+  metricKey: 'totalOutstandingAmount' | 'overdueAmount' | 'overdueItems' | 'upcomingPaymentObligations' | 'completedPayments' | 'outstandingItems' | 'suppliersWithOutstandingBalances' | 'clearedAccountingItems',
   summary: PaymentSummary | null,
   fallbackMap?: Record<string, number>
 ): string {
@@ -105,9 +105,12 @@ function formatMetricValue(
 
   if (!isAvailable) return '—'
 
-  if (metricKey === 'outstandingItems') {
+  if (metricKey === 'outstandingItems' || metricKey === 'overdueItems' || metricKey === 'suppliersWithOutstandingBalances' || metricKey === 'clearedAccountingItems') {
     if (typeof metric?.totalCount === 'number') return String(metric.totalCount)
-    if (typeof summary.outstandingItemCount === 'number') return String(summary.outstandingItemCount)
+    if (metricKey === 'outstandingItems' && typeof summary.outstandingItemCount === 'number') return String(summary.outstandingItemCount)
+    if (metricKey === 'overdueItems' && typeof summary.overdueItemCount === 'number') return String(summary.overdueItemCount)
+    if (metricKey === 'suppliersWithOutstandingBalances' && typeof summary.suppliersWithOutstandingBalances === 'number') return String(summary.suppliersWithOutstandingBalances)
+    if (metricKey === 'clearedAccountingItems' && typeof summary.clearedAccountingItems === 'number') return String(summary.clearedAccountingItems)
     if (metric?.byCurrency && metric.byCurrency.length > 0) {
       return String(metric.byCurrency.reduce((sum, item) => sum + item.count, 0))
     }
@@ -170,6 +173,7 @@ function mapAccountingLineItems(records: AccountingLineItem[]): PaymentObligatio
       postingDate: record.postingDate,
       dueDate: record.dueDate,
       amount: grossVal,
+      grossAmount: grossVal,
       currency: record.currency ?? record.balanceCurrency,
       paymentStatus: null,
       invoiceProcessingStatus: record.openItemStatus,
@@ -884,26 +888,6 @@ function DashboardPage({
         )}
         {!loading && (
           <SummaryCard
-            label="Upcoming payment obligations"
-            value={formatMetricValue('upcomingPaymentObligations', summary, summary?.upcomingObligationAmountByCurrency)}
-            icon={<ReceiptLongOutlinedIcon />}
-            tone="blue"
-            detail={summary?.metricStatus?.upcomingPaymentObligations === 'available'
-              ? `Next ${summary?.upcomingDays ?? 30} days`
-              : (summary?.metrics?.upcomingPaymentObligations?.reason ?? 'Verified due dates within the reporting period are required')}
-          />
-        )}
-        {!loading && (
-          <SummaryCard
-            label="Completed payments"
-            value="—"
-            icon={<PaidOutlinedIcon />}
-            tone="green"
-            detail={summary?.metrics?.completedPayments?.reason ?? 'Clearing evidence does not establish completed supplier payment'}
-          />
-        )}
-        {!loading && (
-          <SummaryCard
             label="Outstanding items"
             value={formatMetricValue('outstandingItems', summary, undefined)}
             icon={<ReceiptLongOutlinedIcon />}
@@ -911,6 +895,39 @@ function DashboardPage({
             detail={summary?.metricStatus?.outstandingItems === 'available'
               ? 'Verified open accounting items'
               : (summary?.metrics?.outstandingItems?.reason ?? 'Stable item and open-status evidence is required')}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Overdue items"
+            value={formatMetricValue('overdueItems', summary, undefined)}
+            icon={<PaidOutlinedIcon />}
+            tone="orange"
+            detail={summary?.metricStatus?.overdueItems === 'available'
+              ? 'Verified overdue open items'
+              : (summary?.metrics?.overdueItems?.reason ?? 'Authoritative due date and open status are required')}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Suppliers with outstanding balances"
+            value={formatMetricValue('suppliersWithOutstandingBalances', summary, undefined)}
+            icon={<ReceiptLongOutlinedIcon />}
+            tone="blue"
+            detail={summary?.metricStatus?.suppliersWithOutstandingBalances === 'available'
+              ? 'Distinct supplier IDs with verified open balances'
+              : (summary?.metrics?.suppliersWithOutstandingBalances?.reason ?? 'Verified open balances are required to count suppliers')}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Cleared accounting items"
+            value={formatMetricValue('clearedAccountingItems', summary, undefined)}
+            icon={<CheckCircleOutlineRoundedIcon />}
+            tone="green"
+            detail={summary?.metricStatus?.clearedAccountingItems === 'available'
+              ? 'Accounting items with verified clearing evidence'
+              : (summary?.metrics?.clearedAccountingItems?.reason ?? 'Clearing evidence fields are required to count cleared items')}
           />
         )}
       </Box>
@@ -1095,7 +1112,7 @@ function PaymentRecords({
                       <td>{liveValue(record.documentReference ?? record.invoiceReference)}</td>
                       <td>{formatLiveDate(record.documentDate)}</td>
                       <td>{formatLiveDate(record.postingDate)}</td>
-                      <td className="amount-cell">{liveAmount(record.amount ?? record.invoiceAmount, record.currency)}</td>
+                      <td className="amount-cell">{liveAmount(record.grossAmount ?? record.amount ?? record.invoiceAmount, record.currency)}</td>
                       <td>{liveValue(record.currency)}</td>
                       <td>
                         <StatusChip
@@ -1382,7 +1399,7 @@ function RecordDetails({
           ['Document date', formatLiveDate(record.documentDate)],
           ['Posting date', formatLiveDate(record.postingDate)],
           ['Invoice reference', liveValue(record.invoiceReference)],
-          ['Invoice gross amount', liveAmount(record.amount ?? record.invoiceAmount, record.currency)],
+          ['Invoice gross amount', liveAmount(record.grossAmount ?? record.amount ?? record.invoiceAmount, record.currency)],
           ['Currency', liveValue(record.currency)],
           ['Invoice document status', liveValue(record.invoiceProcessingStatus)],
           ['Payment reference', liveValue(record.paymentReference)],

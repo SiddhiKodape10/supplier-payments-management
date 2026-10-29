@@ -189,6 +189,49 @@ test('missing due dates make overdue and upcoming unavailable but leave outstand
   assert.equal(summary.metricStatus.completedPayments, 'unavailable')
 })
 
+test('supported live summary metrics only include verified outstanding, overdue, supplier, and cleared accounting counts', () => {
+  const openUsd = mapped({
+    AccountingDocument: '1900000030',
+    Supplier: '0000100024',
+    NetDueDate: '/Date(1767225600000)/',
+    AmountInTransactionCurrency: '-80.00',
+    BalanceTransactionCurrency: 'USD',
+    TransactionCurrency: 'USD',
+  })
+  const overdueEur = mapped({
+    AccountingDocument: '1900000031',
+    Supplier: '0000100024',
+    NetDueDate: '/Date(1767225600000)/',
+    AmountInTransactionCurrency: '-40.00',
+    BalanceTransactionCurrency: 'EUR',
+    TransactionCurrency: 'EUR',
+  })
+  const cleared = mapped({
+    AccountingDocument: '1900000032',
+    Supplier: '0000100030',
+    NetDueDate: '/Date(1767225600000)/',
+    IsCleared: 'X',
+    ClearingStatus: '1',
+    ClearingAccountingDocument: '2000000007',
+    ClearingDate: '/Date(1767225600000)/',
+    AmountInTransactionCurrency: '-60.00',
+    BalanceTransactionCurrency: 'USD',
+    TransactionCurrency: 'USD',
+  })
+
+  const summary = calculateVendorLineItemSummary([openUsd, overdueEur, cleared], { reportingDate: '2026-01-15' })
+
+  assert.equal(summary.counts.outstandingItems, 2)
+  assert.equal(summary.counts.overdueItems, 2)
+  assert.equal(summary.counts.suppliersWithOutstandingBalances, 1)
+  assert.equal(summary.counts.clearedAccountingItems, 1)
+  assert.equal(summary.metricStatus.overdueItems, 'available')
+  assert.equal(summary.metricStatus.suppliersWithOutstandingBalances, 'available')
+  assert.equal(summary.metricStatus.clearedAccountingItems, 'available')
+  assert.equal(summary.metrics.completedPayments.available, false)
+  assert.equal(summary.metrics.upcomingPaymentObligations.available, true)
+})
+
 test('missing amount or currency causes unverified status', () => {
   const noAmount = mapped({
     AmountInTransactionCurrency: null,

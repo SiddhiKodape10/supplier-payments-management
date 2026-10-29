@@ -38,6 +38,7 @@ export interface PaymentObligation {
   postingDate?: string | null
   dueDate: string | null
   amount: number | null
+  grossAmount?: number | null
   invoiceAmount?: number | null
   currency: string | null
   paymentStatus: PaymentStatus | null
@@ -89,6 +90,8 @@ export interface PaymentSummary {
   completedPaymentAmountByCurrency: Record<string, number>
   outstandingItemCount: number | null
   overdueItemCount: number | null
+  suppliersWithOutstandingBalances?: number | null
+  clearedAccountingItems?: number | null
   upcomingObligationCount: number | null
   completedPaymentCount: number | null
   upcomingDays: number

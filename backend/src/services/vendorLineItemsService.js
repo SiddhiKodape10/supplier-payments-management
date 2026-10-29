@@ -385,6 +385,8 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
   let supportedItemPresent = false
   let openVerificationFailed = false
   let dueAvailable = true
+  const suppliersWithOutstandingBalances = new Set()
+  let clearedAccountingItemsCount = 0
 
   for (const c of currenciesList) {
     totals.outstanding[c] = '0'
@@ -398,13 +400,21 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
   for (const record of unique.values()) {
     if (record.isClearingReversed || isExcludedVendorItem(record)) continue
     supportedItemPresent = true
-    if (isClearedVendorItem(record)) continue
+
+    if (isClearedVendorItem(record)) {
+      clearedAccountingItemsCount += 1
+      continue
+    }
 
     const amount = verifiedOpenAmount(record)
     const currency = record.currency
     if (!amount || !currency) {
       openVerificationFailed = true
       continue
+    }
+
+    if (record.supplierId) {
+      suppliersWithOutstandingBalances.add(record.supplierId)
     }
 
     totals.outstanding[currency] = addDecimal(totals.outstanding[currency] || '0', amount)
@@ -453,6 +463,12 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
       byCurrency: hasDueEvidence ? overdueByCurr : [],
       reason: hasDueEvidence ? undefined : 'Authoritative due dates and open status required',
     },
+    overdueItems: {
+      available: hasDueEvidence,
+      totalCount: hasDueEvidence ? totalOverdueItems : null,
+      byCurrency: hasDueEvidence ? overdueByCurr : [],
+      reason: hasDueEvidence ? undefined : 'Authoritative due dates and open status required',
+    },
     upcomingPaymentObligations: {
       available: hasDueEvidence,
       byCurrency: hasDueEvidence ? upcomingByCurr : [],
@@ -469,14 +485,29 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
       byCurrency: hasVerifiedOpenEvidence ? outstandingByCurr : [],
       reason: hasVerifiedOpenEvidence ? undefined : 'Stable item identity and open status required',
     },
+    suppliersWithOutstandingBalances: {
+      available: hasVerifiedOpenEvidence,
+      totalCount: hasVerifiedOpenEvidence ? suppliersWithOutstandingBalances.size : null,
+      byCurrency: [],
+      reason: hasVerifiedOpenEvidence ? undefined : 'Distinct supplier IDs require verified open balances and currencies',
+    },
+    clearedAccountingItems: {
+      available: supportedItemPresent,
+      totalCount: supportedItemPresent ? clearedAccountingItemsCount : null,
+      byCurrency: [],
+      reason: supportedItemPresent ? undefined : 'Clearing evidence fields are required to count cleared accounting items',
+    },
   }
 
   const metricStatus = {
     totalOutstandingAmount: metrics.totalOutstandingAmount.available ? 'available' : 'unavailable',
     overdueAmount: metrics.overdueAmount.available ? 'available' : 'unavailable',
+    overdueItems: metrics.overdueItems.available ? 'available' : 'unavailable',
     upcomingPaymentObligations: metrics.upcomingPaymentObligations.available ? 'available' : 'unavailable',
     completedPayments: 'unavailable',
     outstandingItems: metrics.outstandingItems.available ? 'available' : 'unavailable',
+    suppliersWithOutstandingBalances: metrics.suppliersWithOutstandingBalances.available ? 'available' : 'unavailable',
+    clearedAccountingItems: metrics.clearedAccountingItems.available ? 'available' : 'unavailable',
   }
 
   return {
@@ -497,6 +528,8 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
       overdueItems: totalOverdueItems,
       upcomingItems: totalUpcomingItems,
       completedPayments: 0,
+      suppliersWithOutstandingBalances: suppliersWithOutstandingBalances.size,
+      clearedAccountingItems: clearedAccountingItemsCount,
     },
     limitations: [
       'Clearing evidence identifies a cleared accounting item; it does not independently prove a completed supplier payment.',
