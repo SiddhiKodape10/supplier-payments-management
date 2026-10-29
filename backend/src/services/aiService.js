@@ -6,6 +6,7 @@ import {
   createUnavailableSapPaymentSummary,
   filterPaymentObligations,
   getSapSupplierInvoices,
+  getSapVendorLineItemsPage,
   getDemoPaymentObligations,
   getPaymentDataMode,
 } from './supplierPaymentsService.js'
@@ -68,7 +69,7 @@ const PAYMENT_ANSWER_SCHEMA = {
 const PAYMENT_SYSTEM_PROMPT = `You answer read-only questions about the backend-retrieved supplier invoice records and summary supplied in the user message.
 Use only the supplied data. Do not guess, calculate, infer missing fields, or invent financial amounts, dates, references, statuses, or suppliers.
 Always call the records DEMO SAMPLE DATA when dataMode is demo; never imply it is verified SAP data.
-When dataMode is live, the records are SAP supplier invoices, not confirmed payment obligations. Invoice gross amounts are not outstanding balances. SupplierInvoiceStatus is an invoice-document status, not payment or clearing status. Never claim an invoice is paid, unpaid, overdue, or due on a particular date unless the supplied data explicitly verifies it.
+When dataMode is live, invoice records are SAP supplier invoices, not confirmed payment obligations. Accounting line items may be supplied separately as verified read-only SAP accounting records. Never infer payment status from SupplierInvoiceStatus. Clearing evidence, due dates, balances, and document classification are supported only by the explicitly supplied fields and summary metric status. Never claim an invoice or accounting item is paid, unpaid, overdue, or due unless the supplied data explicitly verifies it.
 If a requested value is null, missing, or absent, say it is unavailable.
 Do not create, update, approve, post, release, initiate, or execute payments. Do not claim an action was taken.
 Return a complete sentence or short explanation, not a bare number or identifier. Keep the answer brief and return only JSON matching the supplied schema.`
@@ -273,9 +274,18 @@ export async function answerPaymentQuestion(prompt, filters = {}, { client = axi
     records = page.records
     liveMatchTotal = page.total
   }
-  const summary = dataMode === 'demo'
+  let accountingLineItems = []
+  let summary = dataMode === 'demo'
     ? calculatePaymentSummary(records)
     : createUnavailableSapPaymentSummary(records)
+  if (dataMode === 'live') {
+    try {
+      const accountingPage = await getSapVendorLineItemsPage(filters, { top: 100, skip: 0, client })
+      accountingLineItems = accountingPage.records
+    } catch {
+      accountingLineItems = []
+    }
+  }
   if (liveMatchTotal !== null && liveMatchTotal > records.length) {
     summary.limitations = [
       ...summary.limitations,
@@ -302,6 +312,29 @@ export async function answerPaymentQuestion(prompt, filters = {}, { client = axi
       dataSource: record.dataSource,
     })),
     summary,
+    accountingLineItems: dataMode === 'live' ? accountingLineItems.map((record) => ({
+      id: record.id,
+      supplierId: record.supplierId,
+      companyCode: record.companyCode,
+      accountingDocument: record.accountingDocument,
+      accountingDocumentItem: record.accountingDocumentItem,
+      accountingDocumentType: record.accountingDocumentType,
+      invoiceReference: record.invoiceReference,
+      documentDate: record.documentDate,
+      postingDate: record.postingDate,
+      dueDate: record.dueDate,
+      balanceAmount: record.balanceAmount,
+      balanceCurrency: record.balanceCurrency,
+      clearingStatus: record.clearingStatus,
+      clearingDate: record.clearingDate,
+      clearingDocument: record.clearingDocument,
+      isCleared: record.isCleared,
+      hasClearingDocument: record.hasClearingDocument,
+      isClearingReversed: record.isClearingReversed,
+      openItemStatus: record.openItemStatus,
+      verifiedOpenAmount: record.verifiedOpenAmount,
+      dataSource: record.dataSource,
+    })) : [],
   }
 
   let response

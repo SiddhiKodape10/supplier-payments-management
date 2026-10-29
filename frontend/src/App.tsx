@@ -31,12 +31,14 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
   askPaymentAssistant,
   exportPaymentObligations,
+  getAccountingLineItems,
   getHealth,
   getPaymentDetails,
   getPaymentObligations,
   getPaymentSummary,
   getSapConnectionStatus,
   type HealthStatus,
+  type AccountingLineItem,
   type PaymentAssistantResponse,
   type PaymentFilters,
   type PaymentObligation,
@@ -119,6 +121,28 @@ function formatLiveDate(value: string | null | undefined) {
   if (!value) return '—'
   const formatted = formatDate(value)
   return formatted === 'Unavailable' ? '—' : formatted
+}
+
+function mapAccountingLineItems(records: AccountingLineItem[]): PaymentObligation[] {
+  return records.map((record) => ({
+    id: record.id,
+    supplierId: record.supplierId,
+    supplierName: record.supplierName,
+    companyCode: record.companyCode,
+    documentReference: record.accountingDocument,
+    invoiceReference: record.invoiceReference,
+    documentDate: record.documentDate,
+    postingDate: record.postingDate,
+    dueDate: record.dueDate,
+    amount: record.verifiedOpenAmount === null ? null : Number(record.verifiedOpenAmount),
+    currency: record.balanceCurrency,
+    paymentStatus: null,
+    invoiceProcessingStatus: record.openItemStatus,
+    clearingDate: record.clearingDate,
+    paymentReference: record.clearingDocument,
+    dataSource: 'live',
+    limitations: record.verifiedOpenAmount === null ? ['Verified open balance is not available for this accounting item.'] : [],
+  }))
 }
 
 function uniqueRecords(records: PaymentObligation[]) {
@@ -258,25 +282,34 @@ function App() {
     setLoading(true)
     setDataError('')
     try {
-      const [list, totals] = await Promise.all([
-        getPaymentObligations(appliedFilters, {
-          top: PAGE_SIZE,
-          skip: pageIndex * PAGE_SIZE,
-        }),
-        getPaymentSummary(appliedFilters),
-      ])
-      setRecords(uniqueRecords(list.records))
-      setTotal(list.total)
-      setSummary(totals.summary)
-    } catch (error) {
-      setRecords([])
-      setTotal(0)
-      setSummary(null)
-      setDataError(errorMessage(error))
+      const listPromise = page === 'dashboard'
+        ? getAccountingLineItems(appliedFilters, { top: PAGE_SIZE, skip: pageIndex * PAGE_SIZE })
+            .then((result) => ({ ...result, records: mapAccountingLineItems(result.records) }))
+        : getPaymentObligations(appliedFilters, { top: PAGE_SIZE, skip: pageIndex * PAGE_SIZE })
+      const [listResult, totalsResult] = await Promise.allSettled([listPromise, getPaymentSummary(appliedFilters)])
+
+      if (listResult.status === 'fulfilled') {
+        setRecords(uniqueRecords(listResult.value.records))
+        setTotal(listResult.value.total)
+      } else {
+        setRecords([])
+        setTotal(0)
+      }
+
+      if (totalsResult.status === 'fulfilled') {
+        setSummary(totalsResult.value.summary)
+      } else {
+        setSummary(null)
+      }
+
+      const errors = [listResult, totalsResult]
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => errorMessage(result.reason))
+      setDataError(errors.join(' '))
     } finally {
       setLoading(false)
     }
-  }, [appliedFilters, pageIndex])
+  }, [appliedFilters, pageIndex, page])
 
   useEffect(() => {
     if (page !== 'dashboard' && page !== 'search') return
@@ -317,6 +350,10 @@ function App() {
     setSelectedRecord(record)
     setDetailError('')
     setDetailLoading(true)
+    if (page === 'dashboard' && health?.dataMode === 'live') {
+      setDetailLoading(false)
+      return
+    }
     try {
       const result = await getPaymentDetails(record.id)
       setSelectedRecord(result.record)
@@ -330,6 +367,21 @@ function App() {
   const downloadCsv = async () => {
     setExportError('')
     try {
+      if (page === 'dashboard' && health?.dataMode === 'live') {
+        const fields = ['supplierId','supplierName','companyCode','documentReference','documentDate','postingDate','dueDate','amount','currency','invoiceProcessingStatus','clearingDate','paymentReference','dataSource']
+        const escape = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
+        const csv = [fields.join(','), ...sortedRecords.map((record) => fields.map((field) => escape(record[field as keyof PaymentObligation])).join(','))].join('\r\n')
+        const blob = new Blob([`${csv}\r\n`], { type: 'text/csv;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = 'sap-accounting-line-items.csv'
+        document.body.append(anchor)
+        anchor.click()
+        anchor.remove()
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+        return
+      }
       const blob = await exportPaymentObligations(appliedFilters)
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -592,6 +644,14 @@ function FilterPanel({
           slotProps={{ htmlInput: { maxLength: 40 } }}
         />
         <TextField
+          label="Supplier name"
+          value={filters.supplierName ?? ''}
+          onChange={(event) => onChange('supplierName', event.target.value)}
+          size="small"
+          className="payment-filter"
+          slotProps={{ htmlInput: { maxLength: 100 } }}
+        />
+        <TextField
           label="Company code"
           value={filters.companyCode ?? ''}
           onChange={(event) => onChange('companyCode', event.target.value)}
@@ -637,14 +697,20 @@ function FilterPanel({
         )}
         {liveMode && (
           <TextField
-            label="Invoice document status"
-            value={filters.invoiceStatus ?? ''}
-            onChange={(event) => onChange('invoiceStatus', event.target.value)}
+            select
+            label="Verified status"
+            value={filters.paymentStatus ?? ''}
+            onChange={(event) => onChange('paymentStatus', event.target.value)}
             size="small"
             className="payment-filter"
-            placeholder="Actual SAP status code"
-            slotProps={{ htmlInput: { maxLength: 20 } }}
-          />
+          >
+            <MenuItem value="">All statuses</MenuItem>
+            <MenuItem value="Open">Open</MenuItem>
+            <MenuItem value="Overdue">Overdue</MenuItem>
+            <MenuItem value="Cleared">Cleared</MenuItem>
+            <MenuItem value="Reversed">Reversed</MenuItem>
+            <MenuItem value="Unverified">Unverified</MenuItem>
+          </TextField>
         )}
         {liveMode && (
           <>
@@ -754,60 +820,76 @@ function DashboardPage({
   onPageChange: (page: number) => void
   onDetails: (record: PaymentObligation) => void
 }) {
-  const summaryAvailable = summary?.status !== 'unavailable'
-  const liveInvoiceSummary = dataMode === 'live' && summary?.dataSource === 'live'
-  const invoiceGrossByCurrency = summary?.invoiceGrossAmountByCurrency ?? summary?.totalInvoicedByCurrency
-  const statusEntries = Object.entries(summary?.invoiceDocumentStatusSummary ?? {})
-    .sort((left, right) => right[1] - left[1])
   return (
     <>
-      <Box className="payment-summary" aria-label="Live invoice summary">
-        <SummaryCard
-          label="Supplier invoices"
-          value={loading ? 'Loading…' : String(summary?.invoiceCount ?? total)}
-          icon={<ReceiptLongOutlinedIcon />}
-          tone="blue"
-          detail="Matching live SAP records"
-        />
-        <SummaryCard
-          label="Total invoice gross amount"
-          value={loading ? 'Loading…' : liveInvoiceSummary
-            ? formatCurrencyTotals(invoiceGrossByCurrency)
-            : summaryAvailable
-              ? formatCurrencyTotals(summary?.totalOutstandingAmountByCurrency ?? summary?.outstandingAmountByCurrency)
-              : 'No verified totals'}
-          icon={<AccountBalanceWalletOutlinedIcon />}
-          tone="indigo"
-          detail="Grouped by currency · not outstanding balance"
-        />
-        <SummaryCard
-          label="Company codes"
-          value={loading ? 'Loading…' : liveInvoiceSummary
-            ? String(summary?.companyCodeCount ?? summary?.companyCodes?.length ?? 0)
-            : '0'}
-          icon={<CloudOutlinedIcon />}
-          tone="green"
-          detail={liveInvoiceSummary && summary?.companyCodes?.length
-            ? summary.companyCodes.join(' · ')
-            : 'Verified from live invoice records'}
-        />
-        <SummaryCard
-          label="Invoice document status"
-          value={loading ? 'Loading…' : statusEntries.length
-            ? `${statusEntries.length} status${statusEntries.length === 1 ? '' : 'es'}`
-            : 'Not provided'}
-          icon={<PaidOutlinedIcon />}
-          tone="amber"
-          detail={statusEntries.length
-            ? statusEntries.slice(0, 4).map(([status, count]) => `${status}: ${count}`).join(' · ')
-            : 'SupplierInvoiceStatus was not returned'}
-        />
+      <Box className="payment-summary" aria-label="Verified accounting payment summary">
+        {!loading && (
+          <SummaryCard
+            label="Total outstanding amount"
+            value={summary?.metricStatus?.totalOutstandingAmount === 'available'
+              ? formatCurrencyTotals(summary.outstandingAmountByCurrency)
+              : '—'}
+            icon={<AccountBalanceWalletOutlinedIcon />}
+            tone="indigo"
+            detail={summary?.metricStatus?.totalOutstandingAmount === 'available'
+              ? 'Verified accounting balances by currency'
+              : 'Open-item evidence requires verified balance and direction fields'}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Overdue amount"
+            value={summary?.metricStatus?.overdueAmount === 'available'
+              ? formatCurrencyTotals(summary.overdueAmountByCurrency)
+              : '—'}
+            icon={<PaidOutlinedIcon />}
+            tone="amber"
+            detail={summary?.metricStatus?.overdueAmount === 'available'
+              ? `${summary.overdueItemCount ?? 0} verified overdue items`
+              : 'Authoritative due date and open status are required'}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Upcoming payment obligations"
+            value={summary?.metricStatus?.upcomingPaymentObligations === 'available'
+              ? formatCurrencyTotals(summary.upcomingObligationAmountByCurrency)
+              : '—'}
+            icon={<ReceiptLongOutlinedIcon />}
+            tone="blue"
+            detail={summary?.metricStatus?.upcomingPaymentObligations === 'available'
+              ? `Next ${summary.upcomingDays ?? 30} days`
+              : 'Verified due dates within the reporting period are required'}
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Completed payments"
+            value="—"
+            icon={<PaidOutlinedIcon />}
+            tone="green"
+            detail="Clearing evidence does not establish completed supplier payment"
+          />
+        )}
+        {!loading && (
+          <SummaryCard
+            label="Outstanding items"
+            value={summary?.metricStatus?.outstandingItems === 'available'
+              ? String(summary.outstandingItemCount ?? 0)
+              : '—'}
+            icon={<ReceiptLongOutlinedIcon />}
+            tone="amber"
+            detail={summary?.metricStatus?.outstandingItems === 'available'
+              ? 'Verified open accounting items'
+              : 'Stable item and open-status evidence is required'}
+          />
+        )}
       </Box>
       <PaymentRecords
-        title={dataMode === 'live' ? 'Supplier invoices' : 'Payment obligations'}
+        title={dataMode === 'live' ? 'Supplier accounting line items' : 'Payment obligations'}
         dataMode={dataMode}
         description={dataMode === 'live'
-          ? 'Live SAP invoice records use the applied filters. Settlement status and due dates are not part of the current source.'
+          ? 'Verified SAP accounting items with supplier, document, balance, currency, due date, and clearing evidence.'
           : 'Records and summary use the same applied filters.'}
         records={records}
         total={total}
@@ -823,12 +905,12 @@ function DashboardPage({
         onPageChange={onPageChange}
         onDetails={onDetails}
       />
-      {liveInvoiceSummary && (
+      {dataMode === 'live' && (
         <Alert severity="info" className="data-coverage-note">
-          Connected to live SAP supplier invoice data. Payment settlement analytics depend on the availability of verified accounting and clearing information.
+          Connected to live SAP supplier accounting data. Settlement status is not inferred from invoice or clearing fields alone.
         </Alert>
       )}
-      {!liveInvoiceSummary && summary?.limitations.map((limitation) => (
+      {summary?.limitations.map((limitation) => (
         <Typography key={limitation} className="limitation-note">{limitation}</Typography>
       ))}
     </>
@@ -976,7 +1058,10 @@ function PaymentRecords({
                 <tr key={record.id}>
                   {dataMode === 'live' ? (
                     <>
-                      <td><Typography className="supplier-id">{liveValue(record.supplierId)}</Typography></td>
+                      <td>
+                        <Typography className="supplier-name">{liveValue(record.supplierName)}</Typography>
+                        <Typography className="supplier-id">{liveValue(record.supplierId)}</Typography>
+                      </td>
                       <td>{liveValue(record.companyCode)}</td>
                       <td>{liveValue(record.documentReference ?? record.invoiceReference)}</td>
                       <td>{formatLiveDate(record.documentDate)}</td>

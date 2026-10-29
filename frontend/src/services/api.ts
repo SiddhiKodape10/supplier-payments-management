@@ -2,16 +2,17 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 15000,
+  timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 })
 
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Unknown'
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Unknown' | 'Open' | 'Cleared' | 'Unverified' | 'Reversed'
 export type DataMode = 'demo' | 'live' | 'unavailable'
 
 export interface PaymentFilters {
   search?: string
   supplierId?: string
+  supplierName?: string
   companyCode?: string
   paymentStatus?: PaymentStatus | ''
   invoiceStatus?: string
@@ -60,8 +61,12 @@ export interface PaymentListResponse {
 }
 
 export interface PaymentSummary {
-  status?: 'available' | 'unavailable'
+  status?: 'available' | 'partially_available' | 'unavailable'
   reason?: string
+  metricStatus?: Record<string, 'available' | 'unavailable'>
+  sourceService?: string
+  sourceEntity?: string
+  reportingDate?: string
   outstandingAmountByCurrency: Record<string, number>
   totalOutstandingAmountByCurrency: Record<string, number>
   overdueAmountByCurrency: Record<string, number>
@@ -88,6 +93,43 @@ export interface PaymentSummary {
   overdueCount: number | null
   currency: string | null
   limitations: string[]
+}
+
+export interface AccountingLineItem {
+  id: string
+  supplierId: string
+  supplierName: string | null
+  companyCode: string
+  accountingDocument: string
+  accountingDocumentItem: string
+  fiscalYear: string
+  accountingDocumentType: string | null
+  debitCreditCode: string | null
+  documentDate: string | null
+  postingDate: string | null
+  invoiceReference: string | null
+  balanceAmount: string | null
+  balanceCurrency: string | null
+  dueDate: string | null
+  clearingStatus: string | null
+  clearingDate: string | null
+  clearingDocument: string | null
+  isCleared: boolean
+  isClearingReversed: boolean
+  openItemStatus: string
+  verifiedOpenAmount: string | null
+  dataSource: 'live'
+}
+
+export interface AccountingLineItemResponse {
+  dataMode: 'live'
+  records: AccountingLineItem[]
+  total: number
+  top: number
+  skip: number
+  hasMore: boolean
+  sourceService: string
+  sourceEntity: string
 }
 
 export interface PaymentSummaryResponse {
@@ -122,6 +164,12 @@ export interface SapConnectionStatus {
   status: SapStatus
   message: string
   paymentDataStatus: {
+    status: 'available' | 'empty' | 'unavailable'
+    reason?: string
+    recordCount?: number
+    errorCategory?: string
+  }
+  lineItemsStatus?: {
     status: 'available' | 'empty' | 'unavailable'
     reason?: string
     recordCount?: number
@@ -179,13 +227,23 @@ export function getPaymentObligations(
   pagination = { top: 25, skip: 0 },
 ): Promise<PaymentListResponse> {
   return request(() =>
-    api.get<PaymentListResponse>('/payments', { params: queryParams(filters, pagination) }),
+    api.get<PaymentListResponse>('/payments', { params: queryParams(filters, pagination), timeout: 30000 }),
   )
 }
 
 export function getPaymentSummary(filters: PaymentFilters = {}): Promise<PaymentSummaryResponse> {
   return request(() => api.get<PaymentSummaryResponse>('/payments/summary', {
     params: queryParams(filters),
+    timeout: 60000,
+  }))
+}
+
+export function getAccountingLineItems(
+  filters: PaymentFilters = {},
+  pagination = { top: 25, skip: 0 },
+): Promise<AccountingLineItemResponse> {
+  return request(() => api.get<AccountingLineItemResponse>('/payments/line-items', {
+    params: queryParams(filters, pagination), timeout: 60000,
   }))
 }
 

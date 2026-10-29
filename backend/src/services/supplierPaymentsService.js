@@ -7,11 +7,20 @@ import {
   getSapServiceRootUrl,
 } from './sapService.js'
 import { mockSupplierPayments } from './mockSupplierPayments.js'
+import {
+  getVendorLineItems,
+  calculateVendorLineItemSummary,
+  classifyVendorLineItem,
+  verifiedOpenAmount,
+  isSupportedVendorPayable,
+  filterVendorLineItems,
+} from './vendorLineItemsService.js'
 
-const PAYMENT_STATUSES = new Set(['Paid', 'Pending', 'Overdue', 'Unknown'])
+const PAYMENT_STATUSES = new Set(['Paid', 'Pending', 'Overdue', 'Unknown', 'Open', 'Cleared', 'Unverified', 'Reversed'])
 const FILTER_KEYS = new Set([
   'search',
   'supplierId',
+  'supplierName',
   'paymentStatus',
   'invoiceStatus',
   'companyCode',
@@ -57,6 +66,22 @@ const SAP_INVOICE_LIMITATIONS = [
   'SupplierInvoiceStatus is an invoice-document status, not verified payment or clearing status.',
 ]
 const MAX_SUMMARY_RECORDS = 10000
+const paymentSummaryCache = new Map()
+const PAYMENT_SUMMARY_CACHE_TTL_MS = 60 * 1000
+
+function getCachedPaymentSummary(key) {
+  const cached = paymentSummaryCache.get(key)
+  if (!cached || Date.now() - cached.cachedAt >= PAYMENT_SUMMARY_CACHE_TTL_MS) return null
+  return cached.value
+}
+
+function setCachedPaymentSummary(key, value) {
+  paymentSummaryCache.set(key, { cachedAt: Date.now(), value })
+  if (paymentSummaryCache.size > 50) {
+    const oldestKey = paymentSummaryCache.keys().next().value
+    paymentSummaryCache.delete(oldestKey)
+  }
+}
 
 function parseBoundedInteger(value, name, min, max) {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
@@ -119,6 +144,7 @@ export function validatePaymentFilters(filters = {}) {
   const {
     search = '',
     supplierId = '',
+    supplierName = '',
     paymentStatus = '',
     companyCode = '',
     currency = '',
@@ -130,8 +156,11 @@ export function validatePaymentFilters(filters = {}) {
   if (supplierId && !/^[A-Za-z0-9_-]{1,40}$/.test(supplierId)) {
     throw new IntegrationError('Supplier identifier has an invalid format.', 400)
   }
+  if (supplierName.length > 100 || /[\u0000-\u001f\u007f]/.test(supplierName)) {
+    throw new IntegrationError('Supplier name is invalid.', 400)
+  }
   if (paymentStatus && !PAYMENT_STATUSES.has(paymentStatus)) {
-    throw new IntegrationError('Status must be Paid, Pending, Overdue, or Unknown.', 400)
+    throw new IntegrationError('Status must be a supported invoice or accounting status.', 400)
   }
   if (companyCode && !/^[A-Za-z0-9_-]{1,10}$/.test(companyCode)) {
     throw new IntegrationError('Company code has an invalid format.', 400)
@@ -166,6 +195,7 @@ export function validatePaymentFilters(filters = {}) {
   return {
     search: search.trim(),
     supplierId,
+    supplierName: supplierName.trim(),
     paymentStatus,
     companyCode,
     currency: currency.toUpperCase(),
@@ -730,8 +760,79 @@ export function createUnavailableSapPaymentSummary(records) {
   }
 
 export async function getSapPaymentSummary(filters = {}, options = {}) {
-    const records = await getAllSapSupplierInvoices(filters, options)
-    return createUnavailableSapPaymentSummary(records)
+  const cacheKey = JSON.stringify({ filters, upcomingDays: config.upcomingDays })
+  const cached = getCachedPaymentSummary(cacheKey)
+  if (cached) return cached
+
+  const records = await getAllSapSupplierInvoices(filters, options)
+  const unavailable = createUnavailableSapPaymentSummary(records)
+  try {
+    const result = await getVendorLineItems({ client: options.client ?? axios, maxRecords: 5000 })
+    const filteredRecords = filterVendorLineItems(result.records, { ...filters, reportingDate: filters.reportingDate }, filters.reportingDate)
+    const summary = calculateVendorLineItemSummary(filteredRecords, { reportingDate: filters.reportingDate, upcomingDays: config.upcomingDays })
+    const currencyTotals = (values) => Object.fromEntries(Object.entries(values || {}).map(([currency, value]) => [currency, Number(value)]))
+    const unavailableMetrics = { ...unavailable.unavailableMetrics }
+    for (const [metric, status] of Object.entries(summary.metricStatus)) {
+      if (status === 'available') delete unavailableMetrics[metric]
+    }
+    const summaryResponse = {
+      ...unavailable,
+      status: summary.status,
+      sourceService: summary.sourceService,
+      sourceEntity: summary.sourceEntity,
+      lastSuccessfulRefresh: result.lastSuccessfulRefresh,
+      reportingDate: summary.reportingDate,
+      upcomingDays: summary.upcomingDays,
+      metricStatus: summary.metricStatus,
+      totalOutstandingAmountByCurrency: summary.metricStatus.totalOutstandingAmount === 'available' ? currencyTotals(summary.amounts.outstandingByCurrency) : {},
+      outstandingAmountByCurrency: summary.metricStatus.totalOutstandingAmount === 'available' ? currencyTotals(summary.amounts.outstandingByCurrency) : {},
+      overdueAmountByCurrency: summary.metricStatus.overdueAmount === 'available' ? currencyTotals(summary.amounts.overdueByCurrency) : {},
+      upcomingObligationAmountByCurrency: summary.metricStatus.upcomingPaymentObligations === 'available' ? currencyTotals(summary.amounts.upcomingByCurrency) : {},
+      completedPaymentAmountByCurrency: {},
+      outstandingItemCount: summary.metricStatus.outstandingItems === 'available' ? summary.counts.outstandingItems : null,
+      overdueItemCount: summary.metricStatus.overdueAmount === 'available' ? summary.counts.overdueItems : null,
+      upcomingObligationCount: summary.metricStatus.upcomingPaymentObligations === 'available' ? summary.counts.upcomingItems : null,
+      completedPaymentCount: summary.metricStatus.completedPayments === 'available' ? summary.counts.completedPayments : null,
+      availableMetrics: [...unavailable.availableMetrics, ...Object.keys(summary.counts).filter((key) => summary.counts[key] > 0)],
+      unavailableMetrics,
+      limitations: [...new Set([...unavailable.limitations, ...summary.limitations])],
+    }
+    setCachedPaymentSummary(cacheKey, summaryResponse)
+    return summaryResponse
+  } catch (error) {
+    const unavailableResponse = {
+      ...unavailable,
+      sourceService: 'FAP_VENDOR_LINE_ITEMS_SRV',
+      sourceEntity: 'Items',
+      metricStatus: {
+        totalOutstandingAmount: 'unavailable', overdueAmount: 'unavailable', upcomingPaymentObligations: 'unavailable', completedPayments: 'unavailable', outstandingItems: 'unavailable',
+      },
+      limitations: [...new Set([...unavailable.limitations, `Vendor line-item service unavailable: ${error instanceof Error ? error.message : 'unknown error'}`])],
+    }
+    setCachedPaymentSummary(cacheKey, unavailableResponse)
+    return unavailableResponse
+  }
+}
+
+export async function getSapVendorLineItemsPage(filters = {}, { top = 25, skip = 0, client = axios, maxRecords = 5000 } = {}) {
+  const result = await getVendorLineItems({ client, maxRecords })
+  const filtered = filterVendorLineItems(result.records, filters, new Date().toISOString().slice(0, 10))
+  const records = filtered.slice(skip, skip + top).map((record) => ({
+    ...record,
+    openItemStatus: classifyVendorLineItem(record, new Date().toISOString().slice(0, 10)),
+    verifiedOpenAmount: verifiedOpenAmount(record),
+  }))
+  return { ...result, records, total: filtered.length, top, skip, hasMore: skip + records.length < filtered.length }
+}
+
+export async function getSapVendorLineItemFilters({ client = axios, maxRecords = 5000 } = {}) {
+  const result = await getVendorLineItems({ client, maxRecords })
+  return {
+    companyCodes: [...new Set(result.records.map((record) => record.companyCode).filter(Boolean))].sort(),
+    currencies: [...new Set(result.records.map((record) => record.balanceCurrency || record.transactionCurrency).filter(Boolean))].sort(),
+    supplierIds: [...new Set(result.records.map((record) => record.supplierId).filter(Boolean))].sort(),
+    openItemStatuses: ['Open', 'Overdue', 'Cleared'],
+  }
 }
 
 export function getDemoSuppliers() {

@@ -113,8 +113,9 @@ test('SAP status reports connected only after successful read-only OData respons
       assert.equal(response.status, 200)
       assert.equal(body.status, 'connected')
       assert.equal(body.paymentDataStatus.status, 'empty')
-      assert.match(body.message, /authenticated read-only request/)
-      assert.equal(requestCount, 2)
+      assert.match(body.message, /read-only request/)
+      assert.equal(requestCount, 3)
+      assert.equal(body.lineItemsStatus.status, 'unavailable')
 
       const invoices = await readJson(`${baseUrl}/api/invoices`)
       assert.equal(invoices.body.dataMode, 'demo')

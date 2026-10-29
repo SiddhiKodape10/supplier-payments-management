@@ -16,6 +16,9 @@ export const config = {
     odataPath:
       process.env.SAP_ODATA_PATH?.trim() ||
       '/API_SUPPLIERINVOICE_PROCESS_SRV',
+    lineItemsOdataPath:
+      process.env.SAP_LINE_ITEMS_ODATA_PATH?.trim() ||
+      '/FAP_VENDOR_LINE_ITEMS_SRV',
   },
   ai: {
     url: process.env.OLLAMA_URL?.trim() || 'http://127.0.0.1:11434',

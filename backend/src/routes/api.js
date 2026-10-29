@@ -15,7 +15,10 @@ import {
   getAllSapSupplierInvoices,
   checkSapSupplierInvoiceAvailability,
   validatePaymentFilters,
+  getSapVendorLineItemsPage,
+  getSapVendorLineItemFilters,
 } from '../services/supplierPaymentsService.js'
+import { checkVendorLineItemsAvailability } from '../services/vendorLineItemsService.js'
 import {
   IntegrationError,
   checkSapConnection,
@@ -64,10 +67,12 @@ router.get('/sap/status', async (_request, response) => {
     const paymentDataStatus = await checkSapSupplierInvoiceAvailability({
       entitySets: connection.entitySets,
     })
+    const lineItemsStatus = await checkVendorLineItemsAvailability()
     response.json({
       status: 'connected',
-      message: 'The configured SAP OData service document was verified with an authenticated read-only request.',
+      message: 'The configured SAP OData service documents were verified with authenticated read-only requests.',
       paymentDataStatus,
+      lineItemsStatus,
     })
   } catch (error) {
     const status = error instanceof IntegrationError
@@ -285,6 +290,31 @@ async function readPaymentDetail(request, response, next) {
     next(error)
   }
 }
+
+router.get('/payments/line-items', async (request, response, next) => {
+  if (getPaymentDataMode() !== 'live') {
+    response.status(409).json({ error: 'Accounting line items are available only in live SAP mode.' })
+    return
+  }
+  const filters = parseFilters(request, response, next)
+  if (!filters) return
+  try {
+    const page = await getSapVendorLineItemsPage(request.query, {
+      top: Math.min(Math.max(filters.top || 25, 1), 100),
+      skip: Math.max(filters.skip || 0, 0),
+    })
+    response.json({ dataMode: 'live', ...page })
+  } catch (error) { next(error) }
+})
+
+router.get('/payments/line-items/filters', async (_request, response, next) => {
+  if (getPaymentDataMode() !== 'live') {
+    response.status(409).json({ error: 'Accounting line-item filters are available only in live SAP mode.' })
+    return
+  }
+  try { response.json({ dataMode: 'live', ...(await getSapVendorLineItemFilters()) }) }
+  catch (error) { next(error) }
+})
 
 router.get('/payments/export', (request, response, next) => {
   const filters = parseFilters(request, response, next)

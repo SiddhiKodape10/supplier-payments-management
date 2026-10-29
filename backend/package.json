@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "validate:config": "node --input-type=module -e \"import('./src/config.js').then(({ validateConfig }) => { validateConfig(); console.log('Configuration is valid.') })\"",
-    "check:syntax": "node --check src/server.js && node --check src/app.js && node --check src/config.js && node --check src/routes/api.js && node --check src/services/sapService.js && node --check src/services/aiService.js && node --check src/services/supplierPaymentsService.js && node --check src/services/mockSupplierPayments.js && node --check test/config.test.js && node --check test/api.test.js && node --check test/sapService.test.js && node --check test/aiService.test.js && node --check test/supplierPayments.test.js",
+    "check:syntax": "node --check src/server.js && node --check src/app.js && node --check src/config.js && node --check src/routes/api.js && node --check src/services/sapService.js && node --check src/services/aiService.js && node --check src/services/supplierPaymentsService.js && node --check src/services/vendorLineItemsService.js && node --check src/services/mockSupplierPayments.js && node --check test/config.test.js && node --check test/api.test.js && node --check test/sapService.test.js && node --check test/aiService.test.js && node --check test/supplierPayments.test.js && node --check test/vendorLineItems.test.js",
     "test": "node --test",
     "check": "npm run validate:config && npm run check:syntax && npm test"
   },
