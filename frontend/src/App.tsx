@@ -15,6 +15,7 @@ import {
   Paper,
   TextField,
   Toolbar,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import type { ReactNode } from 'react'
@@ -92,6 +93,38 @@ function formatCurrencyTotals(totals: Record<string, number> | undefined) {
   return entries.map(([currency, amount]) => formatAmount(amount, currency)).join(' · ')
 }
 
+function formatMetricValue(
+  metricKey: 'totalOutstandingAmount' | 'overdueAmount' | 'upcomingPaymentObligations' | 'completedPayments' | 'outstandingItems',
+  summary: PaymentSummary | null,
+  fallbackMap?: Record<string, number>
+): string {
+  if (!summary) return '—'
+  const metric = summary.metrics?.[metricKey]
+  const status = summary.metricStatus?.[metricKey]
+  const isAvailable = metric ? metric.available : status === 'available'
+
+  if (!isAvailable) return '—'
+
+  if (metricKey === 'outstandingItems') {
+    if (typeof metric?.totalCount === 'number') return String(metric.totalCount)
+    if (typeof summary.outstandingItemCount === 'number') return String(summary.outstandingItemCount)
+    if (metric?.byCurrency && metric.byCurrency.length > 0) {
+      return String(metric.byCurrency.reduce((sum, item) => sum + item.count, 0))
+    }
+    return '0'
+  }
+
+  if (metric?.byCurrency && metric.byCurrency.length > 0) {
+    return metric.byCurrency.map((item) => formatAmount(item.amount, item.currency)).join(' · ')
+  }
+
+  if (fallbackMap && Object.keys(fallbackMap).length > 0) {
+    return formatCurrencyTotals(fallbackMap)
+  }
+
+  return '—'
+}
+
 function displayValue(value: string | null | undefined) {
   return value?.trim() || 'Unavailable'
 }
@@ -124,25 +157,29 @@ function formatLiveDate(value: string | null | undefined) {
 }
 
 function mapAccountingLineItems(records: AccountingLineItem[]): PaymentObligation[] {
-  return records.map((record) => ({
-    id: record.id,
-    supplierId: record.supplierId,
-    supplierName: record.supplierName,
-    companyCode: record.companyCode,
-    documentReference: record.accountingDocument,
-    invoiceReference: record.invoiceReference,
-    documentDate: record.documentDate,
-    postingDate: record.postingDate,
-    dueDate: record.dueDate,
-    amount: record.verifiedOpenAmount === null ? null : Number(record.verifiedOpenAmount),
-    currency: record.balanceCurrency,
-    paymentStatus: null,
-    invoiceProcessingStatus: record.openItemStatus,
-    clearingDate: record.clearingDate,
-    paymentReference: record.clearingDocument,
-    dataSource: 'live',
-    limitations: record.verifiedOpenAmount === null ? ['Verified open balance is not available for this accounting item.'] : [],
-  }))
+  return records.map((record) => {
+    const grossVal = record.grossAmount ? Number(record.grossAmount) : (typeof record.amount === 'number' ? Math.abs(record.amount) : null)
+    return {
+      id: record.id,
+      supplierId: record.supplierId,
+      supplierName: record.supplierName,
+      companyCode: record.companyCode,
+      documentReference: record.accountingDocument,
+      invoiceReference: record.invoiceReference,
+      documentDate: record.documentDate,
+      postingDate: record.postingDate,
+      dueDate: record.dueDate,
+      amount: grossVal,
+      currency: record.currency ?? record.balanceCurrency,
+      paymentStatus: null,
+      invoiceProcessingStatus: record.openItemStatus,
+      statusReason: record.statusReason,
+      clearingDate: record.clearingDate,
+      paymentReference: record.clearingDocument,
+      dataSource: 'live',
+      limitations: record.openItemStatus === 'Unverified' ? ['Open balance could not be verified for this accounting item.'] : [],
+    }
+  })
 }
 
 function uniqueRecords(records: PaymentObligation[]) {

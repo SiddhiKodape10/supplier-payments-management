@@ -7,30 +7,79 @@ const PAGE_SIZE = 100
 const LINE_ITEM_CACHE_TTL_MS = 60 * 1000
 const lineItemCache = new Map()
 const lineItemInflight = new Map()
-const PAYABLE_TYPES = new Set(['KR', 'RE'])
-const CREDIT_TYPES = new Set(['KG'])
-const SUPPORTED_TYPES = new Set([...PAYABLE_TYPES, ...CREDIT_TYPES])
+
+export const SUPPORTED_DOC_TYPES = new Set([
+  'KR', // Vendor Invoice
+  'RE', // Invoice Receipt (MM Logistics)
+  'KG', // Vendor Credit Memo
+  'KZ', // Vendor Payment
+  'ZP', // Payment Posting
+  'KA', // Vendor Document (General AP)
+  'AB', // General Accounting Document / Clearing
+  'CC', // Payment Card Settlement
+  'SA', // G/L Account Document
+  'RK', // Invoice Reduction
+  'Y1', // Internal Document
+])
+
 const LINE_FIELDS = [
-  'Supplier','SupplierName','CompanyCode','AccountingDocument','AccountingDocumentItem','FiscalYear',
-  'AccountingDocumentType','DebitCreditCode','DocumentDate','PostingDate','InvoiceReference',
-  'AmountInTransactionCurrency','TransactionCurrency','AmountInBalanceTransactionCurrency','BalanceTransactionCurrency',
-  'AmountInPaymentCurrency','PaymentCurrency','NetDueDate','ClearingStatus','ClearingDate',
-  'ClearingAccountingDocument','ClearingDocFiscalYear','HasClearingAccountingDocument','IsCleared','IsClearingReversed'
+  'Supplier',
+  'SupplierName',
+  'CompanyCode',
+  'AccountingDocument',
+  'AccountingDocumentItem',
+  'FiscalYear',
+  'AccountingDocumentType',
+  'DebitCreditCode',
+  'DocumentDate',
+  'PostingDate',
+  'InvoiceReference',
+  'AmountInTransactionCurrency',
+  'TransactionCurrency',
+  'AmountInBalanceTransactionCurrency',
+  'BalanceTransactionCurrency',
+  'AmountInCompanyCodeCurrency',
+  'CompanyCodeCurrency',
+  'AmountInPaymentCurrency',
+  'PaymentCurrency',
+  'NetDueDate',
+  'DueCalculationBaseDate',
+  'NetPaymentDays',
+  'SpecialGeneralLedgerCode',
+  'ClearingStatus',
+  'ClearingDate',
+  'ClearingAccountingDocument',
+  'ClearingDocFiscalYear',
+  'HasClearingAccountingDocument',
+  'IsCleared',
+  'IsClearingReversed',
 ]
 
-function text(value) { return typeof value === 'string' && value.trim() ? value.trim() : null }
+function text(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 function sapDate(value) {
   if (typeof value !== 'string') return null
-  const match = /^\/Date\((\d+)(?:[-+]\d{4})?\)\/$/.exec(value)
-  if (!match) return null
-  const date = new Date(Number(match[1]))
-  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null
+  const match = /^\/Date\((-?\d+)(?:[-+]\d{4})?\)\/$/.exec(value)
+  if (match) {
+    const date = new Date(Number(match[1]))
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    const date = new Date(value)
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null
+  }
+  return null
 }
+
 function decimal(value) {
+  if (value === null || value === undefined) return null
   if (typeof value !== 'number' && typeof value !== 'string') return null
   const normalized = String(value).trim()
   return /^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized) ? normalized : null
 }
+
 function compareDecimal(left, right) {
   if (!left || !right) return null
   const [li, lf = ''] = left.replace(/^[+-]/, '').split('.')
@@ -40,6 +89,7 @@ function compareDecimal(left, right) {
   const rs = BigInt((right.startsWith('-') ? '-' : '') + `${ri || '0'}${rf.padEnd(scale, '0')}`)
   return ls === rs ? 0 : ls < rs ? -1 : 1
 }
+
 function addDecimal(left, right) {
   const [li, lf = ''] = left.replace(/^[+-]/, '').split('.')
   const [ri, rf = ''] = right.replace(/^[+-]/, '').split('.')
@@ -52,8 +102,15 @@ function addDecimal(left, right) {
   const result = scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits
   return `${negative ? '-' : ''}${result}`
 }
-function isX(value) { return text(value)?.toUpperCase() === 'X' }
-function path() { return text(config.sap.lineItemsOdataPath) || '/FAP_VENDOR_LINE_ITEMS_SRV' }
+
+function isX(value) {
+  return text(value)?.toUpperCase() === 'X'
+}
+
+function path() {
+  return text(config.sap.lineItemsOdataPath) || '/FAP_VENDOR_LINE_ITEMS_SRV'
+}
+
 function origin() {
   const url = new URL(config.sap.baseUrl)
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
@@ -61,9 +118,18 @@ function origin() {
   }
   return url.origin
 }
-function serviceUrl() { return new URL(`${path().replace(/\/$/, '')}/`, origin()).toString() }
-function entityUrl() { return new URL(`${path().replace(/\/$/, '')}/Items`, origin()).toString() }
-function metadataUrl() { return new URL(`${path().replace(/\/$/, '')}/$metadata`, origin()).toString() }
+
+function serviceUrl() {
+  return new URL(`${path().replace(/\/$/, '')}/`, origin()).toString()
+}
+
+function entityUrl() {
+  return new URL(`${path().replace(/\/$/, '')}/Items`, origin()).toString()
+}
+
+function metadataUrl() {
+  return new URL(`${path().replace(/\/$/, '')}/$metadata`, origin()).toString()
+}
 
 function axiosError(error, operation) {
   if (error instanceof IntegrationError) throw error
@@ -76,6 +142,33 @@ function axiosError(error, operation) {
   throw new IntegrationError(`SAP ${operation} request failed (HTTP ${status}).`, 502, status >= 500 ? 'unavailable' : 'other_error', status)
 }
 
+export function getExclusionReason(record) {
+  if (record.specialGeneralLedgerCode === 'F') {
+    return 'Noted item (down payment request) does not affect accounting balance'
+  }
+  if (record.accountingDocumentType && !SUPPORTED_DOC_TYPES.has(record.accountingDocumentType)) {
+    return `Document type ${record.accountingDocumentType} is not a recognized accounts payable document`
+  }
+  return null
+}
+
+export function isExcludedVendorItem(record) {
+  return Boolean(getExclusionReason(record))
+}
+
+export function isClearedVendorItem(record) {
+  return (
+    record.isCleared ||
+    record.hasClearingDocument ||
+    Boolean(record.clearingDocument && record.clearingDate) ||
+    record.clearingStatus === '1'
+  )
+}
+
+export function isSupportedVendorPayable(record) {
+  return !record.isClearingReversed && !isExcludedVendorItem(record) && Boolean(record.supplierId)
+}
+
 export function mapVendorLineItem(row) {
   const supplier = text(row.Supplier)
   const companyCode = text(row.CompanyCode)
@@ -85,7 +178,45 @@ export function mapVendorLineItem(row) {
   if (!supplier || !companyCode || !accountingDocument || !item || !fiscalYear) {
     throw new IntegrationError('SAP vendor line item lacks a stable accounting key or supplier.', 502, 'invalid_data')
   }
-  return {
+
+  const documentType = text(row.AccountingDocumentType)
+  const debitCreditCode = text(row.DebitCreditCode)?.toUpperCase() ?? null
+  const txAmount = decimal(row.AmountInTransactionCurrency)
+  const balAmount = decimal(row.AmountInBalanceTransactionCurrency)
+  const rawAmount = txAmount ?? balAmount
+  const currency = text(row.TransactionCurrency) || text(row.BalanceTransactionCurrency) || text(row.CompanyCodeCurrency)
+
+  // Unsigned gross amount for display
+  const grossAmount = rawAmount ? rawAmount.replace(/^-/, '') : null
+
+  // In AP vendor subledger:
+  // Credit ('H') is amount owed to vendor (+ payable liability)
+  // Debit ('S') reduces payable / credit memo / payment (- payable)
+  let signedAmount = null
+  if (grossAmount && debitCreditCode) {
+    if (debitCreditCode === 'H') signedAmount = grossAmount
+    else if (debitCreditCode === 'S') signedAmount = `-${grossAmount}`
+  }
+
+  // Authoritative due date: NetDueDate, fallback to baseline date + net terms
+  let dueDate = sapDate(row.NetDueDate)
+  if (!dueDate && row.DueCalculationBaseDate && row.NetPaymentDays !== undefined && row.NetPaymentDays !== null) {
+    const base = sapDate(row.DueCalculationBaseDate)
+    const days = Number(row.NetPaymentDays)
+    if (base && Number.isFinite(days)) {
+      const dt = new Date(`${base}T00:00:00Z`)
+      dt.setUTCDate(dt.getUTCDate() + days)
+      dueDate = dt.toISOString().slice(0, 10)
+    }
+  }
+
+  const clearingDoc = text(row.ClearingAccountingDocument)
+  const clearingDate = sapDate(row.ClearingDate)
+  const isCleared = isX(row.IsCleared) || isX(row.HasClearingAccountingDocument) || text(row.ClearingStatus) === '1' || Boolean(clearingDoc && clearingDate)
+  const isReversal = isX(row.IsClearingReversed)
+  const specialGl = text(row.SpecialGeneralLedgerCode)
+
+  const record = {
     id: `${companyCode}_${fiscalYear}_${accountingDocument}_${item}`,
     supplierId: supplier,
     supplierName: text(row.SupplierName),
@@ -93,54 +224,74 @@ export function mapVendorLineItem(row) {
     accountingDocument,
     accountingDocumentItem: item,
     fiscalYear,
-    accountingDocumentType: text(row.AccountingDocumentType),
-    debitCreditCode: text(row.DebitCreditCode),
+    accountingDocumentType: documentType,
+    documentType,
+    debitCreditCode,
     documentDate: sapDate(row.DocumentDate),
     postingDate: sapDate(row.PostingDate),
     invoiceReference: text(row.InvoiceReference),
-    balanceAmount: decimal(row.AmountInBalanceTransactionCurrency),
+    balanceAmount: balAmount,
     balanceCurrency: text(row.BalanceTransactionCurrency),
-    transactionAmount: decimal(row.AmountInTransactionCurrency),
+    transactionAmount: txAmount,
     transactionCurrency: text(row.TransactionCurrency),
     paymentAmount: decimal(row.AmountInPaymentCurrency),
     paymentCurrency: text(row.PaymentCurrency),
-    dueDate: sapDate(row.NetDueDate),
+    currency,
+    grossAmount,
+    amount: signedAmount ? Number(signedAmount) : null,
+    signedAmount,
+    dueDate,
     clearingStatus: text(row.ClearingStatus),
-    clearingDate: sapDate(row.ClearingDate),
-    clearingDocument: text(row.ClearingAccountingDocument),
+    clearingDate,
+    clearingDocument: clearingDoc,
     clearingDocFiscalYear: text(row.ClearingDocFiscalYear),
     hasClearingDocument: isX(row.HasClearingAccountingDocument),
-    isCleared: isX(row.IsCleared),
-    isClearingReversed: isX(row.IsClearingReversed),
-    dataSource: 'live'
+    isCleared,
+    isClearingReversed: isReversal,
+    isReversal,
+    specialGeneralLedgerCode: specialGl,
+    source: 'SAP',
+    dataSource: 'live',
   }
-}
 
-export function isClearedVendorItem(record) {
-  return record.isCleared || record.hasClearingDocument || Boolean(record.clearingDocument && record.clearingDate) || record.clearingStatus === '1'
-}
-
-export function isSupportedVendorPayable(record) {
-  return SUPPORTED_TYPES.has(record.accountingDocumentType) && !record.isClearingReversed && Boolean(record.supplierId)
+  return record
 }
 
 export function verifiedOpenAmount(record) {
-  if (!isSupportedVendorPayable(record) || isClearedVendorItem(record) || !record.balanceAmount || !record.balanceCurrency) return null
-  if (record.debitCreditCode !== 'H' && record.debitCreditCode !== 'S') return null
-  const unsigned = record.balanceAmount.replace(/^-/, '')
-  if (PAYABLE_TYPES.has(record.accountingDocumentType)) return record.debitCreditCode === 'S' ? unsigned : null
-  if (CREDIT_TYPES.has(record.accountingDocumentType)) return record.debitCreditCode === 'H' ? `-${unsigned}` : null
-  return null
+  if (record.isClearingReversed || isClearedVendorItem(record)) return null
+  if (isExcludedVendorItem(record)) return null
+  if (!record.signedAmount || !record.currency) return null
+  return record.signedAmount
+}
+
+export function getVendorLineItemStatusDetails(record, reportingDate) {
+  if (record.isClearingReversed) {
+    return { status: 'Reversed', reason: 'Document or clearing is reversed' }
+  }
+  const excludedReason = getExclusionReason(record)
+  if (excludedReason) {
+    return { status: 'Excluded', reason: excludedReason }
+  }
+  if (isClearedVendorItem(record)) {
+    const docInfo = record.clearingDocument ? ` by doc ${record.clearingDocument}` : ''
+    const dateInfo = record.clearingDate ? ` on ${record.clearingDate}` : ''
+    return { status: 'Cleared', reason: `Cleared${docInfo}${dateInfo}`.trim() }
+  }
+  if (!verifiedOpenAmount(record)) {
+    return { status: 'Unverified', reason: 'Open balance or currency could not be verified' }
+  }
+  if (!record.dueDate) {
+    return { status: 'Open', reason: 'Open item without authoritative due date' }
+  }
+  const report = text(reportingDate) || new Date().toISOString().slice(0, 10)
+  if (record.dueDate < report) {
+    return { status: 'Overdue', reason: `Due date ${record.dueDate} is before ${report}` }
+  }
+  return { status: 'Open', reason: `Due on ${record.dueDate}` }
 }
 
 export function classifyVendorLineItem(record, reportingDate) {
-  if (record.isClearingReversed) return 'Reversed'
-  if (!isSupportedVendorPayable(record)) return 'Excluded'
-  if (isClearedVendorItem(record)) return 'Cleared'
-  if (!verifiedOpenAmount(record)) return 'Open status not verified'
-  if (!record.dueDate) return 'Open'
-  const report = text(reportingDate) || new Date().toISOString().slice(0, 10)
-  return record.dueDate < report ? 'Overdue' : 'Open'
+  return getVendorLineItemStatusDetails(record, reportingDate).status
 }
 
 async function fetchVendorLineItems({ client = axios, maxRecords = MAX_RECORDS } = {}) {
@@ -156,7 +307,7 @@ async function fetchVendorLineItems({ client = axios, maxRecords = MAX_RECORDS }
   try {
     while (records.length < maxRecords) {
       const response = await client.get(continuation || entityUrl(), {
-        auth, headers, maxRedirects: 0, timeout: 15000,
+        auth, headers, maxRedirects: 0, timeout: 30000,
         ...(continuation ? {} : { params: { ...params, '$skip': skip } }),
       })
       const body = response.data?.d
@@ -212,70 +363,145 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
   const horizon = new Date(`${report}T00:00:00Z`)
   horizon.setUTCDate(horizon.getUTCDate() + upcomingDays)
   const horizonEnd = horizon.toISOString().slice(0, 10)
-  const totals = { outstanding: {}, overdue: {}, upcoming: {} }
-  const counts = { outstanding: 0, overdue: 0, upcoming: 0, completed: 0 }
+
   const unique = new Map()
   for (const record of records) {
     if (!record?.id || unique.has(record.id)) continue
     unique.set(record.id, record)
   }
 
-  let openAvailable = true
-  let dueAvailable = true
-  let supportedItemPresent = false
+  // Collect all distinct active currencies across all records
+  const allCurrencies = new Set()
   for (const record of unique.values()) {
-    if (record.isClearingReversed || !SUPPORTED_TYPES.has(record.accountingDocumentType)) continue
+    if (record.currency) allCurrencies.add(record.currency)
+  }
+  const currenciesList = [...allCurrencies].sort()
+
+  const totals = { outstanding: {}, overdue: {}, upcoming: {} }
+  const counts = { outstanding: {}, overdue: {}, upcoming: {} }
+  let totalOutstandingItems = 0
+  let totalOverdueItems = 0
+  let totalUpcomingItems = 0
+  let supportedItemPresent = false
+  let openVerificationFailed = false
+
+  for (const c of currenciesList) {
+    totals.outstanding[c] = '0'
+    totals.overdue[c] = '0'
+    totals.upcoming[c] = '0'
+    counts.outstanding[c] = 0
+    counts.overdue[c] = 0
+    counts.upcoming[c] = 0
+  }
+
+  for (const record of unique.values()) {
+    if (record.isClearingReversed || isExcludedVendorItem(record)) continue
     supportedItemPresent = true
     if (isClearedVendorItem(record)) continue
 
     const amount = verifiedOpenAmount(record)
-    if (!amount || !record.balanceCurrency) {
-      openAvailable = false
-      dueAvailable = false
+    const currency = record.currency
+    if (!amount || !currency) {
+      openVerificationFailed = true
       continue
     }
-    totals.outstanding[record.balanceCurrency] = addDecimal(totals.outstanding[record.balanceCurrency] || '0', amount)
-    counts.outstanding += 1
 
-    if (!record.dueDate) {
-      dueAvailable = false
-      continue
-    }
-    if (record.dueDate < report) {
-      totals.overdue[record.balanceCurrency] = addDecimal(totals.overdue[record.balanceCurrency] || '0', amount)
-      counts.overdue += 1
-    } else if (record.dueDate <= horizonEnd) {
-      totals.upcoming[record.balanceCurrency] = addDecimal(totals.upcoming[record.balanceCurrency] || '0', amount)
-      counts.upcoming += 1
+    totals.outstanding[currency] = addDecimal(totals.outstanding[currency] || '0', amount)
+    counts.outstanding[currency] = (counts.outstanding[currency] || 0) + 1
+    totalOutstandingItems += 1
+
+    if (record.dueDate) {
+      if (record.dueDate < report) {
+        totals.overdue[currency] = addDecimal(totals.overdue[currency] || '0', amount)
+        counts.overdue[currency] = (counts.overdue[currency] || 0) + 1
+        totalOverdueItems += 1
+      } else if (record.dueDate <= horizonEnd) {
+        totals.upcoming[currency] = addDecimal(totals.upcoming[currency] || '0', amount)
+        counts.upcoming[currency] = (counts.upcoming[currency] || 0) + 1
+        totalUpcomingItems += 1
+      }
     }
   }
 
-  const hasVerifiedOpenEvidence = supportedItemPresent && openAvailable
+  const hasVerifiedOpenEvidence = supportedItemPresent && !openVerificationFailed
+
+  // Build byCurrency array helper
+  const buildByCurrency = (amountMap, countMap) => {
+    return currenciesList.map((currency) => ({
+      currency,
+      amount: Number(amountMap[currency] || '0'),
+      count: countMap[currency] || 0,
+    }))
+  }
+
+  const outstandingByCurr = buildByCurrency(totals.outstanding, counts.outstanding)
+  const overdueByCurr = buildByCurrency(totals.overdue, counts.overdue)
+  const upcomingByCurr = buildByCurrency(totals.upcoming, counts.upcoming)
+
+  const metrics = {
+    totalOutstandingAmount: {
+      available: hasVerifiedOpenEvidence,
+      byCurrency: hasVerifiedOpenEvidence ? outstandingByCurr : [],
+      reason: hasVerifiedOpenEvidence ? undefined : 'Open balance or direction fields could not be verified on all matching open items',
+    },
+    overdueAmount: {
+      available: hasVerifiedOpenEvidence,
+      byCurrency: hasVerifiedOpenEvidence ? overdueByCurr : [],
+      reason: hasVerifiedOpenEvidence ? undefined : 'Authoritative due dates and open status required',
+    },
+    upcomingPaymentObligations: {
+      available: hasVerifiedOpenEvidence,
+      byCurrency: hasVerifiedOpenEvidence ? upcomingByCurr : [],
+      reason: hasVerifiedOpenEvidence ? undefined : 'Authoritative due dates required for upcoming obligations',
+    },
+    completedPayments: {
+      available: false,
+      byCurrency: [],
+      reason: 'Clearing evidence identifies a cleared accounting item; it does not independently prove a completed supplier payment.',
+    },
+    outstandingItems: {
+      available: hasVerifiedOpenEvidence,
+      totalCount: hasVerifiedOpenEvidence ? totalOutstandingItems : null,
+      byCurrency: hasVerifiedOpenEvidence ? outstandingByCurr : [],
+      reason: hasVerifiedOpenEvidence ? undefined : 'Stable item identity and open status required',
+    },
+  }
+
   const metricStatus = {
-    totalOutstandingAmount: hasVerifiedOpenEvidence ? 'available' : (supportedItemPresent ? 'unavailable' : 'unavailable'),
-    overdueAmount: hasVerifiedOpenEvidence && dueAvailable ? 'available' : 'unavailable',
-    upcomingPaymentObligations: hasVerifiedOpenEvidence && dueAvailable ? 'available' : 'unavailable',
+    totalOutstandingAmount: metrics.totalOutstandingAmount.available ? 'available' : 'unavailable',
+    overdueAmount: metrics.overdueAmount.available ? 'available' : 'unavailable',
+    upcomingPaymentObligations: metrics.upcomingPaymentObligations.available ? 'available' : 'unavailable',
     completedPayments: 'unavailable',
-    outstandingItems: hasVerifiedOpenEvidence ? 'available' : 'unavailable',
+    outstandingItems: metrics.outstandingItems.available ? 'available' : 'unavailable',
   }
+
   return {
     status: Object.values(metricStatus).includes('available') ? 'partially_available' : 'unavailable',
     reportingDate: report,
     upcomingDays,
     sourceService: 'FAP_VENDOR_LINE_ITEMS_SRV',
     sourceEntity: 'Items',
+    metrics,
     metricStatus,
-    amounts: { outstandingByCurrency: totals.outstanding, overdueByCurrency: totals.overdue, upcomingByCurrency: totals.upcoming },
-    counts: { outstandingItems: counts.outstanding, overdueItems: counts.overdue, upcomingItems: counts.upcoming, completedPayments: counts.completed },
+    amounts: {
+      outstandingByCurrency: totals.outstanding,
+      overdueByCurrency: totals.overdue,
+      upcomingByCurrency: totals.upcoming,
+    },
+    counts: {
+      outstandingItems: totalOutstandingItems,
+      overdueItems: totalOverdueItems,
+      upcomingItems: totalUpcomingItems,
+      completedPayments: 0,
+    },
     limitations: [
       'Clearing evidence identifies a cleared accounting item; it does not independently prove a completed supplier payment.',
-      'KR and RE supplier payables and KG credit adjustments are supported only when the balance currency, balance amount, debit/credit direction, and accounting type are populated.',
-      'Amounts use AmountInBalanceTransactionCurrency and debit/credit direction; PaymentCurrency and AmountInPaymentCurrency are not used as open balances.',
-      'NetDueDate is used only when present. Missing due dates prevent overdue and upcoming verification.',
-      'Reversed items and unsupported accounting document types are excluded.',
-      'Currencies are reported separately and never converted.',
-      'Completed payment metrics are unavailable because payment and clearing semantics have not been fully verified tenant-wide.'
-    ]
+      'Amounts use signed transaction or balance amounts with debit/credit direction per standard AP subledger rules.',
+      'NetDueDate is authoritative when present. Items lacking authoritative due dates are excluded from date-based totals.',
+      'Reversed items and noted items (such as down payment requests) do not affect accounting balances.',
+      'Currencies are reported separately and never converted or combined.',
+      'Completed payment metrics remain unavailable because payment and clearing semantics require clearing document header verification.',
+    ],
   }
 }
 
@@ -287,27 +513,46 @@ export function filterVendorLineItems(records, filters = {}, reportingDate) {
   const currency = text(filters.currency)?.toUpperCase()
   const status = text(filters.paymentStatus)
   const report = text(reportingDate) || new Date().toISOString().slice(0, 10)
+
   return records.filter((record) => {
-    if (search && ![record.supplierId, record.supplierName, record.accountingDocument, record.accountingDocumentItem, record.invoiceReference, record.id]
-      .filter(Boolean).some((value) => String(value).toLowerCase().includes(search))) return false
+    if (
+      search &&
+      ![
+        record.supplierId,
+        record.supplierName,
+        record.accountingDocument,
+        record.accountingDocumentItem,
+        record.invoiceReference,
+        record.id,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search))
+    ) {
+      return false
+    }
     if (supplierId && record.supplierId !== supplierId) return false
     if (supplierName && !String(record.supplierName || '').toLowerCase().includes(supplierName)) return false
     if (companyCode && record.companyCode !== companyCode) return false
-    if (currency && record.balanceCurrency !== currency && record.transactionCurrency !== currency) return false
+    if (currency && record.currency !== currency && record.balanceCurrency !== currency && record.transactionCurrency !== currency) {
+      return false
+    }
     if (filters.documentDateFrom && (!record.documentDate || record.documentDate < filters.documentDateFrom)) return false
     if (filters.documentDateTo && (!record.documentDate || record.documentDate > filters.documentDateTo)) return false
     if (filters.dueDateFrom && (!record.dueDate || record.dueDate < filters.dueDateFrom)) return false
     if (filters.dueDateTo && (!record.dueDate || record.dueDate > filters.dueDateTo)) return false
-    const filterAmount = verifiedOpenAmount(record) ?? record.balanceAmount
-    if (filters.minAmount && (!filterAmount || compareDecimal(filterAmount.replace(/^-/, ''), filters.minAmount) < 0)) return false
-    if (filters.maxAmount && (!filterAmount || compareDecimal(filterAmount.replace(/^-/, ''), filters.maxAmount) > 0)) return false
+
+    const filterAmount = record.grossAmount ?? (record.signedAmount ? record.signedAmount.replace(/^-/, '') : null)
+    if (filters.minAmount && (!filterAmount || compareDecimal(filterAmount, filters.minAmount) < 0)) return false
+    if (filters.maxAmount && (!filterAmount || compareDecimal(filterAmount, filters.maxAmount) > 0)) return false
+
     if (status) {
       const classification = classifyVendorLineItem(record, report)
       if (status === 'Open' && classification !== 'Open') return false
       if (status === 'Overdue' && classification !== 'Overdue') return false
       if (status === 'Cleared' && classification !== 'Cleared') return false
       if (status === 'Reversed' && classification !== 'Reversed') return false
-      if (status === 'Unverified' && classification !== 'Open status not verified') return false
+      if (status === 'Excluded' && classification !== 'Excluded') return false
+      if (status === 'Unverified' && classification !== 'Unverified') return false
     }
     return true
   })

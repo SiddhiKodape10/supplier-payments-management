@@ -6,7 +6,7 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Unknown' | 'Open' | 'Cleared' | 'Unverified' | 'Reversed'
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Unknown' | 'Open' | 'Cleared' | 'Unverified' | 'Reversed' | 'Excluded'
 export type DataMode = 'demo' | 'live' | 'unavailable'
 
 export interface PaymentFilters {
@@ -42,6 +42,7 @@ export interface PaymentObligation {
   currency: string | null
   paymentStatus: PaymentStatus | null
   invoiceProcessingStatus?: string | null
+  statusReason?: string | null
   paymentDate?: string | null
   clearingDate: string | null
   paymentReference: string | null
@@ -60,10 +61,24 @@ export interface PaymentListResponse {
   limitations: string[]
 }
 
+export interface MetricCurrencyAmount {
+  currency: string
+  amount: number
+  count: number
+}
+
+export interface MetricResult {
+  available: boolean
+  byCurrency: MetricCurrencyAmount[]
+  reason?: string
+  totalCount?: number | null
+}
+
 export interface PaymentSummary {
   status?: 'available' | 'partially_available' | 'unavailable'
   reason?: string
   metricStatus?: Record<string, 'available' | 'unavailable'>
+  metrics?: Record<string, MetricResult>
   sourceService?: string
   sourceEntity?: string
   reportingDate?: string
@@ -110,6 +125,9 @@ export interface AccountingLineItem {
   invoiceReference: string | null
   balanceAmount: string | null
   balanceCurrency: string | null
+  currency?: string | null
+  grossAmount?: string | null
+  amount?: number | null
   dueDate: string | null
   clearingStatus: string | null
   clearingDate: string | null
@@ -117,6 +135,7 @@ export interface AccountingLineItem {
   isCleared: boolean
   isClearingReversed: boolean
   openItemStatus: string
+  statusReason?: string | null
   verifiedOpenAmount: string | null
   dataSource: 'live'
 }
