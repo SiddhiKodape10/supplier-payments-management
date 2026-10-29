@@ -384,6 +384,7 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
   let totalUpcomingItems = 0
   let supportedItemPresent = false
   let openVerificationFailed = false
+  let dueAvailable = true
 
   for (const c of currenciesList) {
     totals.outstanding[c] = '0'
@@ -420,10 +421,13 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
         counts.upcoming[currency] = (counts.upcoming[currency] || 0) + 1
         totalUpcomingItems += 1
       }
+    } else {
+      dueAvailable = false
     }
   }
 
   const hasVerifiedOpenEvidence = supportedItemPresent && !openVerificationFailed
+  const hasDueEvidence = hasVerifiedOpenEvidence && dueAvailable
 
   // Build byCurrency array helper
   const buildByCurrency = (amountMap, countMap) => {
@@ -445,14 +449,14 @@ export function calculateVendorLineItemSummary(records, { reportingDate, upcomin
       reason: hasVerifiedOpenEvidence ? undefined : 'Open balance or direction fields could not be verified on all matching open items',
     },
     overdueAmount: {
-      available: hasVerifiedOpenEvidence,
-      byCurrency: hasVerifiedOpenEvidence ? overdueByCurr : [],
-      reason: hasVerifiedOpenEvidence ? undefined : 'Authoritative due dates and open status required',
+      available: hasDueEvidence,
+      byCurrency: hasDueEvidence ? overdueByCurr : [],
+      reason: hasDueEvidence ? undefined : 'Authoritative due dates and open status required',
     },
     upcomingPaymentObligations: {
-      available: hasVerifiedOpenEvidence,
-      byCurrency: hasVerifiedOpenEvidence ? upcomingByCurr : [],
-      reason: hasVerifiedOpenEvidence ? undefined : 'Authoritative due dates required for upcoming obligations',
+      available: hasDueEvidence,
+      byCurrency: hasDueEvidence ? upcomingByCurr : [],
+      reason: hasDueEvidence ? undefined : 'Authoritative due dates required for upcoming obligations',
     },
     completedPayments: {
       available: false,

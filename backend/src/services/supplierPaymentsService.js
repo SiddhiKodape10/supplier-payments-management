@@ -761,6 +761,14 @@ export function createUnavailableSapPaymentSummary(records) {
   }
 
 export async function getSapPaymentSummary(filters = {}, options = {}) {
+  if (!isSapConfigured()) {
+    throw new IntegrationError(
+      'SAP supplier payment summary is unavailable. Configure SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD in backend/.env.',
+      503,
+      'configuration_error',
+    )
+  }
+
   const cacheKey = JSON.stringify({ filters, upcomingDays: config.upcomingDays })
   const cached = getCachedPaymentSummary(cacheKey)
   if (cached) return cached
@@ -809,18 +817,12 @@ export async function getSapPaymentSummary(filters = {}, options = {}) {
     setCachedPaymentSummary(cacheKey, summaryResponse)
     return summaryResponse
   } catch (error) {
-    const unavailableResponse = {
-      status: 'unavailable',
-      dataSource: 'live',
-      sourceService: 'FAP_VENDOR_LINE_ITEMS_SRV',
-      sourceEntity: 'Items',
-      metricStatus: {
-        totalOutstandingAmount: 'unavailable', overdueAmount: 'unavailable', upcomingPaymentObligations: 'unavailable', completedPayments: 'unavailable', outstandingItems: 'unavailable',
-      },
-      limitations: [`Vendor line-item service unavailable: ${error instanceof Error ? error.message : 'unknown error'}`],
-    }
-    setCachedPaymentSummary(cacheKey, unavailableResponse)
-    return unavailableResponse
+    if (error instanceof IntegrationError) throw error
+    throw new IntegrationError(
+      `SAP vendor line-item summary retrieval failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      502,
+      'unavailable',
+    )
   }
 }
 

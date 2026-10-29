@@ -863,40 +863,34 @@ function DashboardPage({
         {!loading && (
           <SummaryCard
             label="Total outstanding amount"
-            value={summary?.metricStatus?.totalOutstandingAmount === 'available'
-              ? formatCurrencyTotals(summary.outstandingAmountByCurrency)
-              : '—'}
+            value={formatMetricValue('totalOutstandingAmount', summary, summary?.outstandingAmountByCurrency)}
             icon={<AccountBalanceWalletOutlinedIcon />}
             tone="indigo"
             detail={summary?.metricStatus?.totalOutstandingAmount === 'available'
               ? 'Verified accounting balances by currency'
-              : 'Open-item evidence requires verified balance and direction fields'}
+              : (summary?.metrics?.totalOutstandingAmount?.reason ?? 'Open-item evidence requires verified balance and direction fields')}
           />
         )}
         {!loading && (
           <SummaryCard
             label="Overdue amount"
-            value={summary?.metricStatus?.overdueAmount === 'available'
-              ? formatCurrencyTotals(summary.overdueAmountByCurrency)
-              : '—'}
+            value={formatMetricValue('overdueAmount', summary, summary?.overdueAmountByCurrency)}
             icon={<PaidOutlinedIcon />}
             tone="amber"
             detail={summary?.metricStatus?.overdueAmount === 'available'
-              ? `${summary.overdueItemCount ?? 0} verified overdue items`
-              : 'Authoritative due date and open status are required'}
+              ? `${summary?.overdueItemCount ?? 0} verified overdue items`
+              : (summary?.metrics?.overdueAmount?.reason ?? 'Authoritative due date and open status are required')}
           />
         )}
         {!loading && (
           <SummaryCard
             label="Upcoming payment obligations"
-            value={summary?.metricStatus?.upcomingPaymentObligations === 'available'
-              ? formatCurrencyTotals(summary.upcomingObligationAmountByCurrency)
-              : '—'}
+            value={formatMetricValue('upcomingPaymentObligations', summary, summary?.upcomingObligationAmountByCurrency)}
             icon={<ReceiptLongOutlinedIcon />}
             tone="blue"
             detail={summary?.metricStatus?.upcomingPaymentObligations === 'available'
-              ? `Next ${summary.upcomingDays ?? 30} days`
-              : 'Verified due dates within the reporting period are required'}
+              ? `Next ${summary?.upcomingDays ?? 30} days`
+              : (summary?.metrics?.upcomingPaymentObligations?.reason ?? 'Verified due dates within the reporting period are required')}
           />
         )}
         {!loading && (
@@ -905,20 +899,18 @@ function DashboardPage({
             value="—"
             icon={<PaidOutlinedIcon />}
             tone="green"
-            detail="Clearing evidence does not establish completed supplier payment"
+            detail={summary?.metrics?.completedPayments?.reason ?? 'Clearing evidence does not establish completed supplier payment'}
           />
         )}
         {!loading && (
           <SummaryCard
             label="Outstanding items"
-            value={summary?.metricStatus?.outstandingItems === 'available'
-              ? String(summary.outstandingItemCount ?? 0)
-              : '—'}
+            value={formatMetricValue('outstandingItems', summary, undefined)}
             icon={<ReceiptLongOutlinedIcon />}
             tone="amber"
             detail={summary?.metricStatus?.outstandingItems === 'available'
               ? 'Verified open accounting items'
-              : 'Stable item and open-status evidence is required'}
+              : (summary?.metrics?.outstandingItems?.reason ?? 'Stable item and open-status evidence is required')}
           />
         )}
       </Box>
@@ -1105,7 +1097,13 @@ function PaymentRecords({
                       <td>{formatLiveDate(record.postingDate)}</td>
                       <td className="amount-cell">{liveAmount(record.amount ?? record.invoiceAmount, record.currency)}</td>
                       <td>{liveValue(record.currency)}</td>
-                      <td><Chip size="small" label={liveValue(record.invoiceProcessingStatus)} variant="outlined" /></td>
+                      <td>
+                        <StatusChip
+                          status={record.invoiceProcessingStatus}
+                          reason={record.statusReason}
+                          liveMode
+                        />
+                      </td>
                     </>
                   ) : (
                     <>
@@ -1183,11 +1181,44 @@ function SummaryCard({
   )
 }
 
-function StatusChip({ status }: { status: PaymentStatus | null }) {
-  if (status === null) {
+function StatusChip({
+  status,
+  reason,
+  liveMode = false,
+}: {
+  status: PaymentStatus | string | null | undefined
+  reason?: string | null
+  liveMode?: boolean
+}) {
+  if (!status) {
     return <Chip className="payment-status" label="Unavailable" size="small" variant="outlined" />
   }
-  const normalized = status
+  if (liveMode) {
+    const colorMap: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'> = {
+      Open: 'info',
+      Overdue: 'error',
+      Cleared: 'success',
+      Reversed: 'default',
+      Excluded: 'default',
+      Unverified: 'warning',
+    }
+    const color = colorMap[status] ?? 'default'
+    const chip = (
+      <Chip
+        className={`payment-status status-${status.toLowerCase()}`}
+        label={status}
+        color={color}
+        size="small"
+        variant={status === 'Excluded' || status === 'Reversed' ? 'outlined' : 'filled'}
+      />
+    )
+    return reason ? (
+      <Tooltip title={reason} arrow placement="top">
+        <span>{chip}</span>
+      </Tooltip>
+    ) : chip
+  }
+  const normalized = status as PaymentStatus
   const color = normalized === 'Paid' ? 'success' : normalized === 'Overdue' ? 'error' : 'warning'
   return <Chip className={`payment-status status-${normalized.toLowerCase()}`} label={normalized} color={color} size="small" />
 }
