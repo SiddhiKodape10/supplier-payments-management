@@ -18,6 +18,16 @@ import {
   getSapVendorLineItemsPage,
   getSapVendorLineItemFilters,
 } from '../services/supplierPaymentsService.js'
+import {
+  approveDemoPaymentRequest,
+  createDemoPaymentRequest,
+  getDemoInvoices,
+  getDemoPaymentHistory,
+  getDemoPaymentRequest,
+  getDemoSuppliers as listDemoSuppliers,
+  listDemoPaymentRequests,
+  recordDemoPayment,
+} from '../services/demoPaymentService.js'
 import { checkVendorLineItemsAvailability } from '../services/vendorLineItemsService.js'
 import {
   IntegrationError,
@@ -427,6 +437,112 @@ router.post('/businesspartners', (_request, response) => {
   response.status(410).json({
     error: 'Business Partner creation is not supported by Supplier Payments Management.',
   })
+})
+
+router.get('/demo/suppliers', async (_request, response, next) => {
+  try {
+    const suppliers = await listDemoSuppliers()
+    response.json({ suppliers })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/demo/invoices', async (request, response, next) => {
+  const supplierId = typeof request.query.supplierId === 'string' ? request.query.supplierId.trim() : ''
+  if (!supplierId) {
+    response.status(400).json({ error: 'A supplierId query parameter is required.' })
+    return
+  }
+
+  try {
+    const invoices = await getDemoInvoices(supplierId)
+    response.json({ invoices })
+  } catch (error) {
+    if (error?.statusCode === 404) {
+      response.status(404).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+})
+
+router.get('/demo/payment-requests', async (_request, response, next) => {
+  try {
+    const requests = await listDemoPaymentRequests()
+    response.json({ paymentRequests: requests })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/demo/payment-requests/:requestId', async (request, response, next) => {
+  try {
+    const record = await getDemoPaymentRequest(request.params.requestId)
+    response.json({ request: record })
+  } catch (error) {
+    if (error?.statusCode === 404) {
+      response.status(404).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+})
+
+router.post('/demo/payment-requests', async (request, response, next) => {
+  const body = request.body ?? {}
+  try {
+    const result = await createDemoPaymentRequest(body)
+    response.status(201).json({ request: result })
+  } catch (error) {
+    if (error?.statusCode) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+})
+
+router.post('/demo/payment-requests/:requestId/approve', async (request, response, next) => {
+  const { decision = 'approved', reason = '' } = request.body ?? {}
+  try {
+    const result = await approveDemoPaymentRequest(request.params.requestId, decision, reason)
+    response.json({ request: result })
+  } catch (error) {
+    if (error?.statusCode) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+})
+
+router.get('/demo/payments', async (_request, response, next) => {
+  try {
+    const payments = await getDemoPaymentHistory()
+    response.json({ payments })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/demo/payments', async (request, response, next) => {
+  const requestId = request.body?.requestId
+  if (!requestId) {
+    response.status(400).json({ error: 'A requestId is required to record a demo payment.' })
+    return
+  }
+
+  try {
+    const payment = await recordDemoPayment(requestId, { paymentAmount: request.body?.paymentAmount })
+    response.status(201).json({ payment })
+  } catch (error) {
+    if (error?.statusCode) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
 })
 
 router.post('/ai/search', async (request, response, next) => {

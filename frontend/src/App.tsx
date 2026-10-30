@@ -13,6 +13,11 @@ import {
   InputAdornment,
   MenuItem,
   Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
   Toolbar,
   Tooltip,
@@ -40,16 +45,27 @@ import {
   getSapConnectionStatus,
   type HealthStatus,
   type AccountingLineItem,
+  type DemoInvoice,
+  type DemoPaymentRecord,
+  type DemoPaymentRequest,
+  type DemoSupplier,
   type PaymentAssistantResponse,
   type PaymentFilters,
   type PaymentObligation,
   type PaymentStatus,
   type PaymentSummary,
   type SapConnectionStatus,
+  approveDemoPaymentRequest,
+  createDemoPaymentRequest,
+  listDemoInvoices,
+  listDemoPaymentHistory,
+  listDemoPaymentRequests,
+  listDemoSuppliers,
+  recordApprovedDemoPayment,
 } from './services/api'
 import './App.css'
 
-type Page = 'dashboard' | 'assistant'
+type Page = 'dashboard' | 'assistant' | 'demo'
 type SortKey = 'supplierId' | 'companyCode' | 'supplierName' | 'documentReference' | 'documentDate' | 'postingDate' | 'amount' | 'currency' | 'dueDate' | 'paymentStatus' | 'invoiceProcessingStatus'
 type SortDirection = 'asc' | 'desc'
 
@@ -545,6 +561,9 @@ function App() {
             <Button aria-current={page === 'assistant' ? 'page' : undefined} onClick={() => choosePage('assistant')}>
               <AutoAwesomeOutlinedIcon fontSize="small" /> AI Payment Assistant
             </Button>
+            <Button aria-current={page === 'demo' ? 'page' : undefined} onClick={() => choosePage('demo')}>
+              Create Demo Payment
+            </Button>
           </Box>
         </Paper>
 
@@ -596,6 +615,8 @@ function App() {
             onDetails={showDetails}
           />
         )}
+
+        {page === 'demo' && <DemoPaymentPage />}
 
         <Box component="footer" className="page-footer payments-footer">
           <Typography>Supplier Payments Management</Typography>
@@ -1332,6 +1353,443 @@ function AssistantPage({
             {asking ? <CircularProgress size={20} color="inherit" /> : 'Send'}
           </Button>
         </Box>
+      </Paper>
+    </Box>
+  )
+}
+
+function DemoPaymentPage() {
+  const [suppliers, setSuppliers] = useState<DemoSupplier[]>([])
+  const [invoices, setInvoices] = useState<DemoInvoice[]>([])
+  const [requests, setRequests] = useState<DemoPaymentRequest[]>([])
+  const [selectedSupplierId, setSelectedSupplierId] = useState('')
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('')
+  const [request, setRequest] = useState<DemoPaymentRequest | null>(null)
+  const [paymentRecord, setPaymentRecord] = useState<DemoPaymentRecord | null>(null)
+  const [history, setHistory] = useState<DemoPaymentRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    paymentAmount: '',
+    paymentDate: new Date().toISOString().slice(0, 10),
+    paymentMethod: 'ACH',
+    remarks: '',
+    idempotencyKey: '',
+  })
+
+  const loadSuppliers = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const result = await listDemoSuppliers()
+      setSuppliers(result.suppliers)
+      if (!selectedSupplierId && result.suppliers[0]) {
+        setSelectedSupplierId(result.suppliers[0].supplierId)
+      }
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedSupplierId])
+
+  const loadInvoices = useCallback(async (supplierId: string) => {
+    if (!supplierId) {
+      setInvoices([])
+      setSelectedInvoiceId('')
+      return
+    }
+    try {
+      const result = await listDemoInvoices(supplierId)
+      setInvoices(result.invoices)
+      if (!result.invoices.some((invoice) => invoice.invoiceId === selectedInvoiceId)) {
+        setSelectedInvoiceId(result.invoices[0]?.invoiceId ?? '')
+      }
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    }
+  }, [selectedInvoiceId])
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const result = await listDemoPaymentHistory()
+      setHistory(result.payments)
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    }
+  }, [])
+
+  const loadRequests = useCallback(async () => {
+    try {
+      const result = await listDemoPaymentRequests()
+      setRequests(result.paymentRequests)
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    }
+  }, [])
+
+  const refreshDemoData = useCallback(async () => {
+    if (selectedSupplierId) {
+      await loadInvoices(selectedSupplierId)
+    }
+    await loadHistory()
+    await loadRequests()
+  }, [selectedSupplierId, loadInvoices, loadHistory, loadRequests])
+
+  useEffect(() => {
+    void loadSuppliers()
+  }, [loadSuppliers])
+
+  useEffect(() => {
+    if (selectedSupplierId) {
+      void loadInvoices(selectedSupplierId)
+    }
+  }, [selectedSupplierId, loadInvoices])
+
+  useEffect(() => {
+    void loadHistory()
+    void loadRequests()
+  }, [loadHistory, loadRequests])
+
+  const selectedSupplier = suppliers.find((supplier) => supplier.supplierId === selectedSupplierId) ?? null
+  const selectedInvoice = invoices.find((invoice) => invoice.invoiceId === selectedInvoiceId) ?? null
+
+  const summaryCards = useMemo(() => {
+    const pendingApproval = requests.filter((item) => item.status === 'Pending Approval').length
+    const approved = requests.filter((item) => item.status === 'Approved for Demo Processing').length
+    const recorded = history.length
+    const outstanding = invoices.reduce((sum, invoice) => sum + (invoice.eligibleForPayment ? invoice.remainingBalance : 0), 0)
+    const outstandingCurrency = selectedInvoice?.currency ?? 'USD'
+    return [
+      { label: 'Pending Approval', value: String(pendingApproval), detail: 'Open requests awaiting review', tone: 'amber' },
+      { label: 'Approved', value: String(approved), detail: 'Ready for local recording', tone: 'blue' },
+      { label: 'Payments Recorded', value: String(recorded), detail: 'Successful simulated payments', tone: 'green' },
+      { label: 'Outstanding Balance', value: formatAmount(outstanding, outstandingCurrency), detail: 'Across eligible local invoices', tone: 'purple' },
+    ]
+  }, [requests, history, invoices, selectedInvoice])
+
+  const submitDemoRequest = async () => {
+    if (!selectedInvoice) {
+      setError('Select a valid invoice before creating the payment request.')
+      return
+    }
+    if (!form.paymentAmount || Number(form.paymentAmount) <= 0) {
+      setError('Enter a payment amount greater than zero.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const payload = {
+        supplierId: selectedSupplierId,
+        invoiceId: selectedInvoice.invoiceId,
+        paymentAmount: Number(form.paymentAmount),
+        paymentDate: form.paymentDate,
+        paymentMethod: form.paymentMethod,
+        currency: selectedInvoice.currency,
+        remarks: form.remarks,
+        idempotencyKey: form.idempotencyKey || undefined,
+      }
+      const result = await createDemoPaymentRequest(payload)
+      setRequest(result.request)
+      setPaymentRecord(null)
+      await refreshDemoData()
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleApproval = async (decision: 'approved' | 'rejected') => {
+    if (!request) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await approveDemoPaymentRequest(
+        request.requestId,
+        decision,
+        decision === 'rejected' ? 'Rejected in the local approval simulation.' : 'Approved in the local approval simulation.',
+      )
+      setRequest(result.request)
+      await refreshDemoData()
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRecordPayment = async () => {
+    if (!request) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await recordApprovedDemoPayment(request.requestId)
+      setPaymentRecord(result.payment)
+      setRequest({ ...request, status: 'Demo Payment Recorded' })
+      await refreshDemoData()
+    } catch (apiError) {
+      setError(errorMessage(apiError))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const requestStatusColor = (status: string) => {
+    switch (status) {
+      case 'Pending Approval':
+        return 'warning'
+      case 'Approved for Demo Processing':
+        return 'info'
+      case 'Rejected':
+        return 'error'
+      default:
+        return 'success'
+    }
+  }
+
+  return (
+    <Box className="demo-page-shell">
+      <Box className="section-heading demo-header">
+        <Box>
+          <Chip label="Local Simulation" size="small" color="warning" className="demo-badge" />
+          <Typography variant="h2">Create Payment Request</Typography>
+          <Typography className="section-description">Local supplier records only, simulated processing, no real payment execution and no SAP updates.</Typography>
+        </Box>
+      </Box>
+
+      <Box className="demo-summary-grid">
+        {summaryCards.map((card) => (
+          <Paper key={card.label} className="demo-summary-card" elevation={0}>
+            <Box className={`demo-summary-icon demo-summary-icon-${card.tone}`}>
+              {card.tone === 'amber' ? <ReceiptLongOutlinedIcon fontSize="small" /> : card.tone === 'blue' ? <AccountBalanceWalletOutlinedIcon fontSize="small" /> : card.tone === 'green' ? <CheckCircleOutlineRoundedIcon fontSize="small" /> : <PaidOutlinedIcon fontSize="small" />}
+            </Box>
+            <Typography className="summary-label">{card.label}</Typography>
+            <Typography className="summary-value">{card.value}</Typography>
+            <Typography className="summary-detail">{card.detail}</Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Paper className="demo-panel" elevation={0}>
+        <Box className="demo-panel-header">
+          <Typography variant="h3">Supplier Details</Typography>
+        </Box>
+        <Box className="demo-two-column">
+          <TextField
+            select
+            fullWidth
+            label="Supplier"
+            value={selectedSupplierId}
+            onChange={(event) => setSelectedSupplierId(event.target.value)}
+            size="small"
+          >
+            {suppliers.map((supplier) => (
+              <MenuItem key={supplier.supplierId} value={supplier.supplierId}>
+                {supplier.supplierId} — {supplier.supplierName}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          {selectedSupplier && (
+            <Box className="demo-entity-card">
+              <Typography className="demo-entity-title">{selectedSupplier.supplierName}</Typography>
+              <Typography className="demo-entity-meta">{selectedSupplier.country ?? 'Local market'} · {selectedSupplier.paymentTerms ?? 'Net 30'}</Typography>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      <Paper className="demo-panel" elevation={0}>
+        <Box className="demo-panel-header">
+          <Typography variant="h3">Select Invoice</Typography>
+        </Box>
+        <Box className="demo-two-column demo-invoice-select">
+          <TextField
+            select
+            fullWidth
+            label="Invoice"
+            value={selectedInvoiceId}
+            onChange={(event) => setSelectedInvoiceId(event.target.value)}
+            size="small"
+          >
+            {invoices.map((invoice) => (
+              <MenuItem key={invoice.invoiceId} value={invoice.invoiceId}>
+                {invoice.invoiceNumber} · {invoice.currency} {invoice.remainingBalance.toFixed(2)} remaining
+              </MenuItem>
+            ))}
+          </TextField>
+          {selectedInvoice && (
+            <Box className="demo-invoice-card">
+              <Box className="demo-line-row"><span>Invoice</span><strong>{selectedInvoice.invoiceNumber}</strong></Box>
+              <Box className="demo-line-row"><span>Due date</span><strong>{selectedInvoice.dueDate}</strong></Box>
+              <Box className="demo-line-row"><span>Original</span><strong>{formatAmount(selectedInvoice.originalAmount, selectedInvoice.currency)}</strong></Box>
+              <Box className="demo-line-row"><span>Previous payments</span><strong>{formatAmount(selectedInvoice.previousPaymentsTotal, selectedInvoice.currency)}</strong></Box>
+              <Box className="demo-line-row"><span>Outstanding balance</span><strong>{formatAmount(selectedInvoice.remainingBalance, selectedInvoice.currency)}</strong></Box>
+              <Box className="demo-line-row"><span>Status</span><strong>{selectedInvoice.paymentStatus}</strong></Box>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      <Paper className="demo-panel" elevation={0}>
+        <Box className="demo-panel-header">
+          <Typography variant="h3">Payment Details</Typography>
+        </Box>
+        <Box className="demo-payment-form-grid">
+          <TextField fullWidth label="Supplier" value={selectedSupplier?.supplierName ?? ''} size="small" slotProps={{ input: { readOnly: true } }} />
+          <TextField fullWidth label="Invoice" value={selectedInvoice?.invoiceNumber ?? ''} size="small" slotProps={{ input: { readOnly: true } }} />
+          <TextField fullWidth type="number" label="Payment amount" value={form.paymentAmount} onChange={(event) => setForm((current) => ({ ...current, paymentAmount: event.target.value }))} size="small" slotProps={{ htmlInput: { min: 0, step: '0.01' } }} />
+          <TextField fullWidth type="date" label="Payment date" value={form.paymentDate} onChange={(event) => setForm((current) => ({ ...current, paymentDate: event.target.value }))} size="small" />
+          <TextField select fullWidth label="Payment method" value={form.paymentMethod} onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value }))} size="small">
+            <MenuItem value="ACH">ACH</MenuItem>
+            <MenuItem value="WIRE">WIRE</MenuItem>
+            <MenuItem value="SEPA">SEPA</MenuItem>
+            <MenuItem value="CARD">CARD</MenuItem>
+          </TextField>
+          <TextField fullWidth label="Reference / remarks" value={form.remarks} onChange={(event) => setForm((current) => ({ ...current, remarks: event.target.value }))} size="small" />
+          <TextField fullWidth label="Request reference" value={form.idempotencyKey} onChange={(event) => setForm((current) => ({ ...current, idempotencyKey: event.target.value }))} size="small" />
+        </Box>
+        <Box className="demo-actions">
+          <Button variant="contained" onClick={() => void submitDemoRequest()} disabled={loading || !selectedInvoice}>Submit payment request</Button>
+        </Box>
+      </Paper>
+
+      {error && <Alert severity="error" className="inline-alert">{error}</Alert>}
+
+      {request && (
+        <Paper className="demo-panel" elevation={0}>
+          <Box className="demo-panel-header">
+            <Typography variant="h3">Review Request</Typography>
+          </Box>
+          <Box className="demo-review-grid">
+            <Box className="demo-review-field"><span>Supplier</span><strong>{request.supplierName}</strong></Box>
+            <Box className="demo-review-field"><span>Invoice</span><strong>{request.invoiceNumber}</strong></Box>
+            <Box className="demo-review-field"><span>Requested amount</span><strong>{formatAmount(request.paymentAmount, request.currency)}</strong></Box>
+            <Box className="demo-review-field"><span>Outstanding balance</span><strong>{formatAmount(selectedInvoice?.remainingBalance ?? request.paymentAmount, request.currency)}</strong></Box>
+            <Box className="demo-review-field"><span>Proposed payment</span><strong>{formatAmount(request.paymentAmount, request.currency)}</strong></Box>
+            <Box className="demo-review-field"><span>Payment date</span><strong>{request.paymentDate}</strong></Box>
+            <Box className="demo-review-field"><span>Payment method</span><strong>{request.paymentMethod}</strong></Box>
+            <Box className="demo-review-field"><span>Reference</span><strong>{request.remarks || 'None'}</strong></Box>
+            <Box className="demo-review-field"><span>Status</span><Chip label={request.status} color={requestStatusColor(request.status)} size="small" /></Box>
+          </Box>
+          <Box className="demo-actions">
+            <Button variant="outlined" onClick={() => void handleApproval('rejected')} disabled={loading || request.status !== 'Pending Approval'}>Reject request</Button>
+            <Button variant="contained" onClick={() => void handleApproval('approved')} disabled={loading || request.status !== 'Pending Approval'}>Approve request</Button>
+          </Box>
+        </Paper>
+      )}
+
+      {request && request.status === 'Approved for Demo Processing' && (
+        <Paper className="demo-panel" elevation={0}>
+          <Box className="demo-panel-header">
+            <Typography variant="h3">Approval</Typography>
+          </Box>
+          <Alert severity="info" className="inline-alert">
+            This request has been approved for local processing only. It does not represent a real treasury authorization or SAP posting.
+          </Alert>
+          <Box className="demo-actions">
+            <Button variant="contained" onClick={() => void handleRecordPayment()} disabled={loading}>Record payment</Button>
+          </Box>
+        </Paper>
+      )}
+
+      {paymentRecord && (
+        <Paper className="demo-panel" elevation={0}>
+          <Box className="demo-panel-header">
+            <Typography variant="h3">Payment Recorded</Typography>
+          </Box>
+          <Alert severity="success" className="inline-alert">
+            Payment recorded locally. No real funds were transferred and no SAP invoice was cleared.
+          </Alert>
+          <Box className="demo-review-grid">
+            <Box className="demo-review-field"><span>Payment reference</span><strong>{paymentRecord.paymentId}</strong></Box>
+            <Box className="demo-review-field"><span>Request reference</span><strong>{paymentRecord.requestId}</strong></Box>
+            <Box className="demo-review-field"><span>Supplier</span><strong>{paymentRecord.supplierName}</strong></Box>
+            <Box className="demo-review-field"><span>Invoice</span><strong>{paymentRecord.invoiceNumber}</strong></Box>
+            <Box className="demo-review-field"><span>Amount</span><strong>{formatAmount(paymentRecord.paymentAmount, paymentRecord.currency)}</strong></Box>
+            <Box className="demo-review-field"><span>Date</span><strong>{paymentRecord.paymentDate}</strong></Box>
+            <Box className="demo-review-field"><span>Method</span><strong>{paymentRecord.paymentMethod}</strong></Box>
+            <Box className="demo-review-field"><span>Status</span><Chip label={paymentRecord.status} color="success" size="small" /></Box>
+          </Box>
+        </Paper>
+      )}
+
+      <Paper className="demo-panel" elevation={0}>
+        <Box className="demo-panel-header">
+          <Typography variant="h3">Payment History</Typography>
+        </Box>
+        {history.length === 0 ? (
+          <Typography className="section-description">No recorded payments have been saved yet.</Typography>
+        ) : (
+          <Box className="table-frame">
+            <Box className="table-scroll">
+              <Table className="partner-table demo-payment-table">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Payment reference</TableCell>
+                    <TableCell>Supplier</TableCell>
+                    <TableCell>Invoice</TableCell>
+                    <TableCell>Payment date</TableCell>
+                    <TableCell>Amount</TableCell>
+                    <TableCell>Method</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {history.map((record) => (
+                    <TableRow key={record.paymentId}>
+                      <TableCell>{record.paymentId}</TableCell>
+                      <TableCell>{record.supplierName}</TableCell>
+                      <TableCell>{record.invoiceNumber}</TableCell>
+                      <TableCell>{record.paymentDate}</TableCell>
+                      <TableCell>{formatAmount(record.paymentAmount, record.currency)}</TableCell>
+                      <TableCell>{record.paymentMethod}</TableCell>
+                      <TableCell><Chip label={record.status} color="success" size="small" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          </Box>
+        )}
+      </Paper>
+
+      <Paper className="demo-panel" elevation={0}>
+        <Box className="demo-panel-header">
+          <Typography variant="h3">Approval Queue</Typography>
+        </Box>
+        {requests.length === 0 ? (
+          <Typography className="section-description">No payment requests are currently queued.</Typography>
+        ) : (
+          <Box className="table-frame">
+            <Box className="table-scroll">
+              <Table className="partner-table demo-payment-table">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Request</TableCell>
+                    <TableCell>Supplier</TableCell>
+                    <TableCell>Invoice</TableCell>
+                    <TableCell>Amount</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {requests.map((entry) => (
+                    <TableRow key={entry.requestId}>
+                      <TableCell>{entry.requestId}</TableCell>
+                      <TableCell>{entry.supplierName}</TableCell>
+                      <TableCell>{entry.invoiceNumber}</TableCell>
+                      <TableCell>{formatAmount(entry.paymentAmount, entry.currency)}</TableCell>
+                      <TableCell><Chip label={entry.status} color={requestStatusColor(entry.status)} size="small" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          </Box>
+        )}
       </Paper>
     </Box>
   )

@@ -208,6 +208,61 @@ export interface PaymentAssistantResponse {
   limitations: string[]
 }
 
+export interface DemoSupplier {
+  supplierId: string
+  supplierName: string
+  country?: string
+  paymentTerms?: string
+}
+
+export interface DemoInvoice {
+  invoiceId: string
+  supplierId: string
+  invoiceNumber: string
+  invoiceDate: string
+  dueDate: string
+  originalAmount: number
+  previousPaymentsTotal: number
+  remainingBalance: number
+  paymentStatus: 'Open' | 'Overdue' | 'Paid'
+  eligibleForPayment: boolean
+  currency: string
+  description?: string
+}
+
+export interface DemoPaymentRequest {
+  requestId: string
+  supplierId: string
+  supplierName: string
+  invoiceId: string
+  invoiceNumber: string
+  paymentAmount: number
+  paymentDate: string
+  paymentMethod: string
+  currency: string
+  status: string
+  approvalStatus?: string
+  remarks?: string
+  createdAt: string
+  updatedAt?: string
+  history?: Array<{ action: string; status: string; timestamp: string; source?: string; reason?: string }>
+}
+
+export interface DemoPaymentRecord {
+  paymentId: string
+  requestId: string
+  supplierId: string
+  supplierName: string
+  invoiceId: string
+  invoiceNumber: string
+  paymentAmount: number
+  currency: string
+  paymentDate: string
+  paymentMethod: string
+  status: string
+  createdAt: string
+}
+
 function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError<{ error?: string }>(error)) {
     if (error.response?.data?.error) return error.response.data.error
@@ -238,6 +293,47 @@ function queryParams(filters: PaymentFilters, pagination?: { top: number; skip: 
 
 export function getHealth(): Promise<HealthStatus> {
   return request(() => api.get<HealthStatus>('/health'))
+}
+
+export function listDemoSuppliers(): Promise<{ suppliers: DemoSupplier[] }> {
+  return request(() => api.get<{ suppliers: DemoSupplier[] }>('/demo/suppliers'))
+}
+
+export function listDemoInvoices(supplierId: string): Promise<{ invoices: DemoInvoice[] }> {
+  return request(() => api.get<{ invoices: DemoInvoice[] }>('/demo/invoices', { params: { supplierId } }))
+}
+
+export function createDemoPaymentRequest(payload: {
+  supplierId: string
+  invoiceId: string
+  paymentAmount: number
+  paymentDate: string
+  paymentMethod: string
+  currency?: string
+  remarks?: string
+  idempotencyKey?: string
+}): Promise<{ request: DemoPaymentRequest }> {
+  return request(() => api.post<{ request: DemoPaymentRequest }>('/demo/payment-requests', payload))
+}
+
+export function getDemoPaymentRequest(requestId: string): Promise<{ request: DemoPaymentRequest }> {
+  return request(() => api.get<{ request: DemoPaymentRequest }>(`/demo/payment-requests/${encodeURIComponent(requestId)}`))
+}
+
+export function approveDemoPaymentRequest(requestId: string, decision: 'approved' | 'rejected', reason?: string): Promise<{ request: DemoPaymentRequest }> {
+  return request(() => api.post<{ request: DemoPaymentRequest }>(`/demo/payment-requests/${encodeURIComponent(requestId)}/approve`, { decision, reason }))
+}
+
+export function recordApprovedDemoPayment(requestId: string): Promise<{ payment: DemoPaymentRecord }> {
+  return request(() => api.post<{ payment: DemoPaymentRecord }>('/demo/payments', { requestId }))
+}
+
+export function listDemoPaymentRequests(): Promise<{ paymentRequests: DemoPaymentRequest[] }> {
+  return request(() => api.get<{ paymentRequests: DemoPaymentRequest[] }>('/demo/payment-requests'))
+}
+
+export function listDemoPaymentHistory(): Promise<{ payments: DemoPaymentRecord[] }> {
+  return request(() => api.get<{ payments: DemoPaymentRecord[] }>('/demo/payments'))
 }
 
 export function getSapConnectionStatus(): Promise<SapConnectionStatus> {

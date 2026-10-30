@@ -328,10 +328,19 @@ export function calculatePaymentSummary(records, { now = new Date(), upcomingDay
       summary.outstandingItemCount += 1
       if (usableAmount) addCurrencyAmount(summary.outstandingAmountByCurrency, currency, amount)
       else limitations.add('Some outstanding records have no usable amount or currency.')
-      if (hasDueDate && record.dueDate < today) {
+
+      const isDemoStatus = record.dataSource === 'demo'
+      const isOverdue = isDemoStatus
+        ? record.paymentStatus === 'Overdue'
+        : hasDueDate && record.dueDate < today
+      const isUpcoming = isDemoStatus
+        ? record.paymentStatus === 'Pending'
+        : hasDueDate && record.dueDate >= today && record.dueDate <= upcomingThrough
+
+      if (isOverdue) {
         summary.overdueItemCount += 1
         if (usableAmount) addCurrencyAmount(summary.overdueAmountByCurrency, currency, amount)
-      } else if (hasDueDate && record.dueDate >= today && record.dueDate <= upcomingThrough) {
+      } else if (isUpcoming) {
         summary.upcomingObligationCount += 1
         if (usableAmount) {
           addCurrencyAmount(summary.upcomingObligationAmountByCurrency, currency, amount)

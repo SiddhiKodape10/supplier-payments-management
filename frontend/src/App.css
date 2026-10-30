@@ -625,6 +625,208 @@
   color: #b77c13;
 }
 
+.demo-page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.demo-header {
+  margin-bottom: 0;
+}
+
+.demo-header .MuiTypography-h2 {
+  margin-top: 10px;
+  color: #1d3151;
+  font: 800 clamp(24px, 3vw, 32px) / 1.2 system-ui, sans-serif !important;
+  letter-spacing: -0.9px;
+}
+
+.demo-badge {
+  border-radius: 999px !important;
+  background: #fff7eb !important;
+  color: #94640d !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.demo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.demo-summary-card {
+  padding: 17px 18px;
+  border: 1px solid #e6edf7;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+.demo-summary-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  border-radius: 9px;
+}
+
+.demo-summary-icon-blue {
+  background: #edf4ff;
+  color: #2559a7;
+}
+
+.demo-summary-icon-amber {
+  background: #fff5df;
+  color: #9a650d;
+}
+
+.demo-summary-icon-green {
+  background: #ebf9f0;
+  color: #23785d;
+}
+
+.demo-summary-icon-purple {
+  background: #f3effd;
+  color: #5d4aa5;
+}
+
+.demo-panel {
+  padding: 22px;
+  border: 1px solid #e7ebf1;
+  border-radius: 12px !important;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(27, 45, 70, 0.03);
+}
+
+.demo-panel-header {
+  margin-bottom: 16px;
+}
+
+.demo-panel-header h3 {
+  color: #1d3151;
+  font: 700 16px system-ui, sans-serif;
+  letter-spacing: -0.25px;
+}
+
+.demo-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.demo-entity-card,
+.demo-invoice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid #edf1f6;
+  border-radius: 10px;
+  background: #fafcff;
+}
+
+.demo-entity-title {
+  color: #1d3151;
+  font: 700 15px system-ui, sans-serif !important;
+}
+
+.demo-entity-meta {
+  color: #71829b;
+  font-size: 12px !important;
+}
+
+.demo-line-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  color: #576a83;
+  font-size: 12px;
+}
+
+.demo-line-row strong {
+  color: #213b63;
+}
+
+.demo-payment-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.demo-payment-form-grid .MuiInputBase-root,
+.demo-two-column .MuiInputBase-root {
+  background: #fff;
+}
+
+.demo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.demo-actions .MuiButton-root {
+  min-height: 38px;
+  border-radius: 8px;
+  text-transform: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.demo-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.demo-review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  border: 1px solid #edf1f6;
+  border-radius: 9px;
+  background: #fafcff;
+}
+
+.demo-review-field span {
+  color: #73849a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.demo-review-field strong {
+  color: #213b63;
+  font-size: 12px;
+}
+
+.demo-payment-table td,
+.demo-payment-table th {
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .demo-summary-grid,
+  .demo-two-column,
+  .demo-payment-form-grid,
+  .demo-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-header {
+    align-items: flex-start;
+  }
+}
+
 .payments-heading {
   align-items: center;
   margin-bottom: 23px;
