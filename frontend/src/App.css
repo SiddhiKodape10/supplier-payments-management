@@ -702,6 +702,37 @@
   box-shadow: 0 8px 26px rgba(27, 45, 70, 0.03);
 }
 
+.demo-panel.MuiAccordion-root {
+  margin: 0;
+  border-radius: 12px !important;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(27, 45, 70, 0.03);
+}
+
+.demo-panel.MuiAccordion-root:before {
+  display: none;
+}
+
+.demo-panel .MuiAccordionSummary-root {
+  min-height: 58px !important;
+  padding: 0 18px;
+  border-radius: 12px;
+}
+
+.demo-panel .MuiAccordionSummary-content {
+  margin: 0 !important;
+}
+
+.demo-panel .MuiAccordionSummary-content .MuiTypography-root {
+  color: #1d3151;
+  font: 700 16px system-ui, sans-serif;
+  letter-spacing: -0.25px;
+}
+
+.demo-panel .MuiAccordionDetails-root {
+  padding: 0 18px 18px;
+}
+
 .demo-panel-header {
   margin-bottom: 16px;
 }

@@ -173,6 +173,124 @@ test('overpayment and duplicate submissions are rejected on the backend', async 
   }
 })
 
+test('demo approval queue excludes recorded payments while history keeps them', async () => {
+  const previousPath = process.env.DEMO_PAYMENT_STORE_PATH
+  await resetDemoStore()
+  try {
+    await withServer(async (baseUrl) => {
+      const created = await readJson(`${baseUrl}/api/demo/payment-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierId: 'DEMO-SUP-1001',
+          invoiceId: 'INV-84521',
+          paymentAmount: 120,
+          paymentDate: '2026-11-08',
+          paymentMethod: 'ACH',
+          remarks: 'Queue check',
+          idempotencyKey: 'demo-queue-eligible',
+        }),
+      })
+      assert.equal(created.response.status, 201)
+
+      const approved = await readJson(`${baseUrl}/api/demo/payment-requests/${created.body.request.requestId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved' }),
+      })
+      assert.equal(approved.response.status, 200)
+
+      const recorded = await readJson(`${baseUrl}/api/demo/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: created.body.request.requestId }),
+      })
+      assert.equal(recorded.response.status, 201)
+
+      const queue = await readJson(`${baseUrl}/api/demo/payment-requests`)
+      assert.equal(queue.response.status, 200)
+      assert.ok(queue.body.paymentRequests.every((request) => request.status !== 'Demo Payment Recorded'))
+
+      const history = await readJson(`${baseUrl}/api/demo/payments`)
+      assert.equal(history.response.status, 200)
+      assert.ok(history.body.payments.some((payment) => payment.requestId === created.body.request.requestId && payment.status === 'Demo Payment Recorded'))
+    })
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env.DEMO_PAYMENT_STORE_PATH
+    } else {
+      process.env.DEMO_PAYMENT_STORE_PATH = previousPath
+    }
+  }
+})
+
+test('demo payment history is ordered by newest payment date first', async () => {
+  const previousPath = process.env.DEMO_PAYMENT_STORE_PATH
+  await resetDemoStore()
+  try {
+    await withServer(async (baseUrl) => {
+      const first = await readJson(`${baseUrl}/api/demo/payment-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierId: 'DEMO-SUP-1001',
+          invoiceId: 'INV-84521',
+          paymentAmount: 120,
+          paymentDate: '2026-11-08',
+          paymentMethod: 'ACH',
+          remarks: 'Earlier payment',
+          idempotencyKey: 'demo-history-older',
+        }),
+      })
+      await readJson(`${baseUrl}/api/demo/payment-requests/${first.body.request.requestId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved' }),
+      })
+      await readJson(`${baseUrl}/api/demo/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: first.body.request.requestId }),
+      })
+
+      const second = await readJson(`${baseUrl}/api/demo/payment-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierId: 'DEMO-SUP-1002',
+          invoiceId: 'INV-99001',
+          paymentAmount: 180,
+          paymentDate: '2026-11-12',
+          paymentMethod: 'WIRE',
+          remarks: 'Newer payment',
+          idempotencyKey: 'demo-history-newer',
+        }),
+      })
+      await readJson(`${baseUrl}/api/demo/payment-requests/${second.body.request.requestId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved' }),
+      })
+      await readJson(`${baseUrl}/api/demo/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: second.body.request.requestId }),
+      })
+
+      const history = await readJson(`${baseUrl}/api/demo/payments`)
+      assert.equal(history.response.status, 200)
+      assert.ok(history.body.payments.length >= 2)
+      assert.ok(history.body.payments[0].paymentDate >= history.body.payments[1].paymentDate)
+    })
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env.DEMO_PAYMENT_STORE_PATH
+    } else {
+      process.env.DEMO_PAYMENT_STORE_PATH = previousPath
+    }
+  }
+})
+
 test('demo payment lifecycle keeps approval and history synchronized with invoice balances', async () => {
   const previousPath = process.env.DEMO_PAYMENT_STORE_PATH
   await resetDemoStore()

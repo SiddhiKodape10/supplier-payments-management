@@ -364,6 +364,9 @@ export function buildAccountingAnswer(prompt, { records = [], summary = {}, data
     const totals = aggregateOpenAmounts(filtered)
     const entries = Object.entries(totals)
     if (!entries.length) {
+      if (dataMode === 'live') {
+        return `No matching live SAP accounting items were found for supplier ${target ?? 'the requested supplier'}. The supplier did not match any verified SAP open-item records.`
+      }
       return `No verified open items were found for supplier ${target ?? 'the requested supplier'}. Limitation: Only verified open balances and due dates are considered.`
     }
     const text = entries.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
@@ -381,6 +384,9 @@ export function buildAccountingAnswer(prompt, { records = [], summary = {}, data
     const totals = aggregateOpenAmounts(filtered)
     const entries = Object.entries(totals)
     if (!entries.length) {
+      if (dataMode === 'live') {
+        return `No matching live SAP accounting items were found for company code ${target ?? 'the requested company code'}. The company code did not match any verified SAP open-item records.`
+      }
       return `No verified accounting items were found for company code ${target ?? 'the requested company code'}. Limitation: Only open balances with valid currency and balance data are counted.`
     }
     const text = entries.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
@@ -532,21 +538,33 @@ export async function answerPaymentQuestion(prompt, filters = {}, { client = axi
     throw new IntegrationError('Payment assistant request failed.', 502)
   }
 
-  const liveRecordsForAnswer = dataMode === 'live' && accountingLineItems.length ? accountingLineItems : context.records
+  const promptText = String(prompt || '').trim()
+  const isAccountingMatchQuestion = /\b(open item|open items|outstanding|overdue|accounting|balance|company code|clearing|due date)\b/i.test(promptText)
+  const relevantRecords = dataMode === 'live' && isAccountingMatchQuestion
+    ? accountingLineItems.length > 0
+      ? accountingLineItems
+      : []
+    : records
+
+  const liveRecordsForAnswer = dataMode === 'live' && accountingLineItems.length ? accountingLineItems : []
   const structuredAnswer = buildAccountingAnswer(prompt, { records: liveRecordsForAnswer, summary, dataMode })
   const modelAnswer = parsePaymentAnswer(getCompletedAssistantContent(response.data))
-  const answer = structuredAnswer || (
+  const noMatchingLiveAccountingMessage = dataMode === 'live' && !structuredAnswer && accountingLineItems.length === 0 && records.length > 0
+    ? 'No matching live SAP accounting items were found for the current query. The invoice result was present, but no verified open accounting records met the supplied filter criteria.'
+    : null
+  const answer = structuredAnswer || noMatchingLiveAccountingMessage || (
     dataMode === 'live' && summary.status === 'unavailable'
       ? `${liveMatchTotal === null ? records.length : liveMatchTotal} matching live SAP supplier invoice${liveMatchTotal === 1 ? '' : 's'} were found${liveMatchTotal !== null && liveMatchTotal > records.length ? `; the assistant received the first ${records.length} records for this explanation` : ''}. Supplier names, a verified payment status, clearing information, and confirmed due dates are unavailable, so outstanding, overdue, upcoming, and completed-payment amounts remain unavailable.`
       : modelAnswer
   )
+  const matchedRecordCount = relevantRecords.length
   return {
     dataMode,
     answer,
     answerIsAuthoritative: false,
     summary,
-    records,
-    matchedRecordCount: records.length,
+    records: relevantRecords,
+    matchedRecordCount,
     limitations: summary.limitations,
   }
 }

@@ -797,6 +797,176 @@
         }
       ],
       "approvalReason": "Approved in the local approval simulation."
+    },
+    {
+      "requestId": "DPR-1793367051434-WCU8T2",
+      "supplierId": "DEMO-SUP-1004",
+      "supplierName": "Cedar Ridge Consulting",
+      "invoiceId": "INV-71181",
+      "invoiceNumber": "INV-71181",
+      "invoiceDate": "2026-10-11",
+      "dueDate": "2026-11-15",
+      "originalAmount": 3100,
+      "previousPaymentsTotal": 0,
+      "remainingBalance": 3100,
+      "paymentAmount": 100,
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "WIRE",
+      "currency": "GBP",
+      "remarks": "",
+      "idempotencyKey": "demo-1793367051434-9q3alq",
+      "status": "Demo Payment Recorded",
+      "approvalStatus": "approved",
+      "createdAt": "2026-10-30T13:30:51.434Z",
+      "updatedAt": "2026-10-30T13:31:03.739Z",
+      "history": [
+        {
+          "action": "submitted",
+          "status": "Pending Approval",
+          "timestamp": "2026-10-30T13:30:51.434Z",
+          "source": "local-demo-ui"
+        },
+        {
+          "action": "approved",
+          "status": "Approved for Demo Processing",
+          "timestamp": "2026-10-30T13:30:59.065Z",
+          "source": "local-demo-approval",
+          "reason": "Approved in the local approval simulation."
+        },
+        {
+          "action": "recorded",
+          "status": "Demo Payment Recorded",
+          "timestamp": "2026-10-30T13:31:03.739Z",
+          "source": "local-demo-ledger"
+        }
+      ],
+      "approvalReason": "Approved in the local approval simulation."
+    },
+    {
+      "requestId": "DPR-1793367298729-Y45QEY",
+      "supplierId": "DEMO-SUP-1006",
+      "supplierName": "Blue Peak Logistics",
+      "invoiceId": "INV-77183",
+      "invoiceNumber": "INV-77183",
+      "invoiceDate": "2026-10-02",
+      "dueDate": "2026-11-11",
+      "originalAmount": 12400,
+      "previousPaymentsTotal": 0,
+      "remainingBalance": 12400,
+      "paymentAmount": 400,
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "ACH",
+      "currency": "USD",
+      "remarks": "paid 400",
+      "idempotencyKey": "demo-1793367298729-1ykhar",
+      "status": "Demo Payment Recorded",
+      "approvalStatus": "approved",
+      "createdAt": "2026-10-30T13:34:58.729Z",
+      "updatedAt": "2026-10-30T13:35:15.022Z",
+      "history": [
+        {
+          "action": "submitted",
+          "status": "Pending Approval",
+          "timestamp": "2026-10-30T13:34:58.729Z",
+          "source": "local-demo-ui"
+        },
+        {
+          "action": "approved",
+          "status": "Approved for Demo Processing",
+          "timestamp": "2026-10-30T13:35:11.091Z",
+          "source": "local-demo-approval",
+          "reason": "Approved in the local approval simulation."
+        },
+        {
+          "action": "recorded",
+          "status": "Demo Payment Recorded",
+          "timestamp": "2026-10-30T13:35:15.022Z",
+          "source": "local-demo-ledger"
+        }
+      ],
+      "approvalReason": "Approved in the local approval simulation."
+    },
+    {
+      "requestId": "DPR-1793367952170-VV762M",
+      "supplierId": "DEMO-SUP-1003",
+      "supplierName": "Harborview Logistics",
+      "invoiceId": "INV-11944",
+      "invoiceNumber": "INV-11944",
+      "invoiceDate": "2026-10-20",
+      "dueDate": "2026-11-08",
+      "originalAmount": 5400,
+      "previousPaymentsTotal": 400,
+      "remainingBalance": 5000,
+      "paymentAmount": 800,
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "ACH",
+      "currency": "EUR",
+      "remarks": "",
+      "idempotencyKey": "demo-1793367952170-d7879q",
+      "status": "Demo Payment Recorded",
+      "approvalStatus": "approved",
+      "createdAt": "2026-10-30T13:45:52.170Z",
+      "updatedAt": "2026-10-30T13:47:09.971Z",
+      "history": [
+        {
+          "action": "submitted",
+          "status": "Pending Approval",
+          "timestamp": "2026-10-30T13:45:52.170Z",
+          "source": "local-demo-ui"
+        },
+        {
+          "action": "approved",
+          "status": "Approved for Demo Processing",
+          "timestamp": "2026-10-30T13:47:05.032Z",
+          "source": "local-demo-approval",
+          "reason": "Approved in the local approval simulation."
+        },
+        {
+          "action": "recorded",
+          "status": "Demo Payment Recorded",
+          "timestamp": "2026-10-30T13:47:09.971Z",
+          "source": "local-demo-ledger"
+        }
+      ],
+      "approvalReason": "Approved in the local approval simulation."
+    },
+    {
+      "requestId": "DPR-1793369268370-L0G6LU",
+      "supplierId": "DEMO-SUP-1001",
+      "supplierName": "Northwind Industrial Supplies",
+      "invoiceId": "INV-84521",
+      "invoiceNumber": "INV-84521",
+      "invoiceDate": "2026-10-01",
+      "dueDate": "2026-10-20",
+      "originalAmount": 18450,
+      "previousPaymentsTotal": 9500,
+      "remainingBalance": 8950,
+      "paymentAmount": 50,
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "ACH",
+      "currency": "USD",
+      "remarks": "",
+      "idempotencyKey": "demo-1793369268370-ogqy18",
+      "status": "Rejected",
+      "approvalStatus": "rejected",
+      "createdAt": "2026-10-30T14:07:48.370Z",
+      "updatedAt": "2026-10-30T14:07:55.402Z",
+      "history": [
+        {
+          "action": "submitted",
+          "status": "Pending Approval",
+          "timestamp": "2026-10-30T14:07:48.370Z",
+          "source": "local-demo-ui"
+        },
+        {
+          "action": "rejected",
+          "status": "Rejected",
+          "timestamp": "2026-10-30T14:07:55.407Z",
+          "source": "local-demo-approval",
+          "reason": "Rejected in the local approval simulation."
+        }
+      ],
+      "rejectionReason": "Rejected in the local approval simulation."
     }
   ],
   "paymentRecords": [
@@ -995,6 +1165,48 @@
       "paymentMethod": "WIRE",
       "status": "Demo Payment Recorded",
       "createdAt": "2026-10-30T09:22:07.450Z"
+    },
+    {
+      "paymentId": "DPM-1793367063738-DZSQ1N",
+      "requestId": "DPR-1793367051434-WCU8T2",
+      "supplierId": "DEMO-SUP-1004",
+      "supplierName": "Cedar Ridge Consulting",
+      "invoiceId": "INV-71181",
+      "invoiceNumber": "INV-71181",
+      "paymentAmount": 100,
+      "currency": "GBP",
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "WIRE",
+      "status": "Demo Payment Recorded",
+      "createdAt": "2026-10-30T13:31:03.738Z"
+    },
+    {
+      "paymentId": "DPM-1793367315021-G2D4BX",
+      "requestId": "DPR-1793367298729-Y45QEY",
+      "supplierId": "DEMO-SUP-1006",
+      "supplierName": "Blue Peak Logistics",
+      "invoiceId": "INV-77183",
+      "invoiceNumber": "INV-77183",
+      "paymentAmount": 400,
+      "currency": "USD",
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "ACH",
+      "status": "Demo Payment Recorded",
+      "createdAt": "2026-10-30T13:35:15.021Z"
+    },
+    {
+      "paymentId": "DPM-1793368029966-S2ZKUB",
+      "requestId": "DPR-1793367952170-VV762M",
+      "supplierId": "DEMO-SUP-1003",
+      "supplierName": "Harborview Logistics",
+      "invoiceId": "INV-11944",
+      "invoiceNumber": "INV-11944",
+      "paymentAmount": 800,
+      "currency": "EUR",
+      "paymentDate": "2026-10-30",
+      "paymentMethod": "ACH",
+      "status": "Demo Payment Recorded",
+      "createdAt": "2026-10-30T13:47:09.966Z"
     }
   ]
 }

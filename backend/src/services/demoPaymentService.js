@@ -351,7 +351,10 @@ async function findRequestById(requestId) {
 
 export async function listDemoPaymentRequests() {
   const store = await readStore()
-  return store.paymentRequests.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  return store.paymentRequests
+    .filter((request) => request.status !== 'Demo Payment Recorded')
+    .slice()
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 }
 
 export async function getDemoPaymentRequest(requestId) {
@@ -556,7 +559,11 @@ export async function getDemoPaymentHistory() {
   const store = await readStore()
   return store.paymentRecords
     .slice()
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => {
+      const leftDate = left.paymentDate || left.createdAt || ''
+      const rightDate = right.paymentDate || right.createdAt || ''
+      return rightDate.localeCompare(leftDate) || right.createdAt.localeCompare(left.createdAt)
+    })
     .map((record) => ({
       ...record,
       paymentAmount: roundCurrency(Number(record.paymentAmount)),

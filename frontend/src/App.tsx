@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   AppBar,
   Avatar,
@@ -29,6 +32,7 @@ import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import CheckCircleOutlineRoundedIcon from '@mui/icons-material/CheckCircleOutlineRounded'
 import CloudOutlinedIcon from '@mui/icons-material/CloudOutlined'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
@@ -1314,6 +1318,11 @@ function AssistantPage({
                   <Typography className="assistant-evidence-count">
                     Showing {Math.min(message.result.records.length, 5)} of {message.result.matchedRecordCount} matching {message.result.dataMode === 'live' ? 'live SAP accounting records' : 'demo records'}
                   </Typography>
+                  <Typography className="assistant-record-count">
+                    {message.result.matchedRecordCount === 1
+                      ? 'There is 1 matching record for this question.'
+                      : `There are ${message.result.matchedRecordCount} matching records for this question.`}
+                  </Typography>
                   {message.result.records.slice(0, 5).map((record) => (
                     <Button
                       key={record.id}
@@ -1454,9 +1463,14 @@ function DemoPaymentPage() {
   const selectedSupplier = suppliers.find((supplier) => supplier.supplierId === selectedSupplierId) ?? null
   const selectedInvoice = invoices.find((invoice) => invoice.invoiceId === selectedInvoiceId) ?? null
 
+  const activeRequests = useMemo(
+    () => requests.filter((item) => item.status !== 'Demo Payment Recorded'),
+    [requests],
+  )
+
   const summaryCards = useMemo(() => {
-    const pendingApproval = requests.filter((item) => item.status === 'Pending Approval').length
-    const approved = requests.filter((item) => item.status === 'Approved for Demo Processing').length
+    const pendingApproval = activeRequests.filter((item) => item.status === 'Pending Approval').length
+    const approved = activeRequests.filter((item) => item.status === 'Approved for Demo Processing').length
     const recorded = history.length
     const outstanding = invoices.reduce((sum, invoice) => sum + (invoice.eligibleForPayment ? invoice.remainingBalance : 0), 0)
     const outstandingCurrency = selectedInvoice?.currency ?? 'USD'
@@ -1466,7 +1480,7 @@ function DemoPaymentPage() {
       { label: 'Payments Recorded', value: String(recorded), detail: 'Successful simulated payments', tone: 'green' },
       { label: 'Outstanding Balance', value: formatAmount(outstanding, outstandingCurrency), detail: 'Across eligible local invoices', tone: 'purple' },
     ]
-  }, [requests, history, invoices, selectedInvoice])
+  }, [activeRequests, history, invoices, selectedInvoice])
 
   const submitDemoRequest = async () => {
     if (!selectedInvoice) {
@@ -1716,81 +1730,85 @@ function DemoPaymentPage() {
         </Paper>
       )}
 
-      <Paper className="demo-panel" elevation={0}>
-        <Box className="demo-panel-header">
+      <Accordion className="demo-panel" defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}>
           <Typography variant="h3">Payment History</Typography>
-        </Box>
-        {history.length === 0 ? (
-          <Typography className="section-description">No recorded payments have been saved yet.</Typography>
-        ) : (
-          <Box className="table-frame">
-            <Box className="table-scroll">
-              <Table className="partner-table demo-payment-table">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Payment reference</TableCell>
-                    <TableCell>Supplier</TableCell>
-                    <TableCell>Invoice</TableCell>
-                    <TableCell>Payment date</TableCell>
-                    <TableCell>Amount</TableCell>
-                    <TableCell>Method</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {history.map((record) => (
-                    <TableRow key={record.paymentId}>
-                      <TableCell>{record.paymentId}</TableCell>
-                      <TableCell>{record.supplierName}</TableCell>
-                      <TableCell>{record.invoiceNumber}</TableCell>
-                      <TableCell>{record.paymentDate}</TableCell>
-                      <TableCell>{formatAmount(record.paymentAmount, record.currency)}</TableCell>
-                      <TableCell>{record.paymentMethod}</TableCell>
-                      <TableCell><Chip label={record.status} color="success" size="small" /></TableCell>
+        </AccordionSummary>
+        <AccordionDetails>
+          {history.length === 0 ? (
+            <Typography className="section-description">No recorded payments have been saved yet.</Typography>
+          ) : (
+            <Box className="table-frame">
+              <Box className="table-scroll">
+                <Table className="partner-table demo-payment-table">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Payment reference</TableCell>
+                      <TableCell>Supplier</TableCell>
+                      <TableCell>Invoice</TableCell>
+                      <TableCell>Payment date</TableCell>
+                      <TableCell>Amount</TableCell>
+                      <TableCell>Method</TableCell>
+                      <TableCell>Status</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {history.map((record) => (
+                      <TableRow key={record.paymentId}>
+                        <TableCell>{record.paymentId}</TableCell>
+                        <TableCell>{record.supplierName}</TableCell>
+                        <TableCell>{record.invoiceNumber}</TableCell>
+                        <TableCell>{record.paymentDate}</TableCell>
+                        <TableCell>{formatAmount(record.paymentAmount, record.currency)}</TableCell>
+                        <TableCell>{record.paymentMethod}</TableCell>
+                        <TableCell><Chip label={record.status} color="success" size="small" /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
             </Box>
-          </Box>
-        )}
-      </Paper>
+          )}
+        </AccordionDetails>
+      </Accordion>
 
-      <Paper className="demo-panel" elevation={0}>
-        <Box className="demo-panel-header">
+      <Accordion className="demo-panel" defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}>
           <Typography variant="h3">Approval Queue</Typography>
-        </Box>
-        {requests.length === 0 ? (
-          <Typography className="section-description">No payment requests are currently queued.</Typography>
-        ) : (
-          <Box className="table-frame">
-            <Box className="table-scroll">
-              <Table className="partner-table demo-payment-table">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Request</TableCell>
-                    <TableCell>Supplier</TableCell>
-                    <TableCell>Invoice</TableCell>
-                    <TableCell>Amount</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {requests.map((entry) => (
-                    <TableRow key={entry.requestId}>
-                      <TableCell>{entry.requestId}</TableCell>
-                      <TableCell>{entry.supplierName}</TableCell>
-                      <TableCell>{entry.invoiceNumber}</TableCell>
-                      <TableCell>{formatAmount(entry.paymentAmount, entry.currency)}</TableCell>
-                      <TableCell><Chip label={entry.status} color={requestStatusColor(entry.status)} size="small" /></TableCell>
+        </AccordionSummary>
+        <AccordionDetails>
+          {activeRequests.length === 0 ? (
+            <Typography className="section-description">No payment requests are currently queued.</Typography>
+          ) : (
+            <Box className="table-frame">
+              <Box className="table-scroll">
+                <Table className="partner-table demo-payment-table">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Request</TableCell>
+                      <TableCell>Supplier</TableCell>
+                      <TableCell>Invoice</TableCell>
+                      <TableCell>Amount</TableCell>
+                      <TableCell>Status</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {activeRequests.map((entry) => (
+                      <TableRow key={entry.requestId}>
+                        <TableCell>{entry.requestId}</TableCell>
+                        <TableCell>{entry.supplierName}</TableCell>
+                        <TableCell>{entry.invoiceNumber}</TableCell>
+                        <TableCell>{formatAmount(entry.paymentAmount, entry.currency)}</TableCell>
+                        <TableCell><Chip label={entry.status} color={requestStatusColor(entry.status)} size="small" /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
             </Box>
-          </Box>
-        )}
-      </Paper>
+          )}
+        </AccordionDetails>
+      </Accordion>
     </Box>
   )
 }

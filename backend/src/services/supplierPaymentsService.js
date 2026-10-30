@@ -393,6 +393,21 @@ export function getDemoPaymentSummary(filters = {}, options = {}) {
   }
 }
 
+function normalizeSapIdentifier(value) {
+    if (value === null || value === undefined) return ''
+    const text = String(value).trim()
+    if (!text) return ''
+    const normalized = text.replace(/^0+(?=\d)/, '')
+    return normalized || '0'
+  }
+
+function matchesSapIdentifier(left, right) {
+    const leftValue = String(left ?? '').trim()
+    const rightValue = String(right ?? '').trim()
+    if (!leftValue || !rightValue) return false
+    return leftValue === rightValue || normalizeSapIdentifier(leftValue) === normalizeSapIdentifier(rightValue)
+  }
+
 function escapeODataString(value) {
     return `'${String(value).replaceAll("'", "''")}'`
   }
@@ -412,10 +427,20 @@ function buildSapInvoiceFilter(validated, invoiceKey) {
       ].join(' or '))
     }
     if (validated.supplierId) {
-      filters.push(`InvoicingParty eq ${escapeODataString(validated.supplierId)}`)
+      const normalizedSupplierId = normalizeSapIdentifier(validated.supplierId)
+      const supplierFilterValues = [validated.supplierId, normalizedSupplierId]
+      const supplierMatch = [...new Set(supplierFilterValues.filter(Boolean))]
+        .map((value) => `InvoicingParty eq ${escapeODataString(value)}`)
+        .join(' or ')
+      filters.push(`(${supplierMatch})`)
     }
     if (validated.companyCode) {
-      filters.push(`CompanyCode eq ${escapeODataString(validated.companyCode)}`)
+      const normalizedCompanyCode = normalizeSapIdentifier(validated.companyCode)
+      const companyFilterValues = [validated.companyCode, normalizedCompanyCode]
+      const companyMatch = [...new Set(companyFilterValues.filter(Boolean))]
+        .map((value) => `CompanyCode eq ${escapeODataString(value)}`)
+        .join(' or ')
+      filters.push(`(${companyMatch})`)
     }
     if (validated.currency) {
       filters.push(`DocumentCurrency eq ${escapeODataString(validated.currency)}`)

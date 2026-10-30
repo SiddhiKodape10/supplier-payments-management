@@ -54,6 +54,23 @@ test('vendor line-item mapping verifies stable accounting identity and live fiel
   assert.equal(record.source, 'SAP')
 })
 
+test('filterVendorLineItems matches zero-padded SAP supplier IDs and company codes', () => {
+  const record = mapped({
+    Supplier: '0000100024',
+    CompanyCode: '01000',
+    AccountingDocument: '1900000004',
+    AccountingDocumentItem: '002',
+    FiscalYear: '2026',
+    NetDueDate: '/Date(1767225600000)/',
+    AmountInTransactionCurrency: '-99.00',
+    BalanceTransactionCurrency: 'USD',
+    TransactionCurrency: 'USD',
+  })
+  const filtered = filterVendorLineItems([record], { supplierId: '100024', companyCode: '1000' })
+  assert.equal(filtered.length, 1)
+  assert.equal(filtered[0].supplierId, '0000100024')
+})
+
 test('debit/credit sign mapping: Credit (H) is positive payable, Debit (S) is negative reduction', () => {
   const invoiceCredit = mapped({ AccountingDocumentType: 'KR', DebitCreditCode: 'H', AmountInTransactionCurrency: '-250.00' })
   assert.equal(invoiceCredit.grossAmount, '250.00')

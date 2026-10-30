@@ -59,6 +59,22 @@ function text(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function normalizeSapIdentifier(value) {
+  if (value === null || value === undefined) return ''
+  const textValue = String(value).trim()
+  if (!textValue) return ''
+  const normalized = textValue.replace(/^0+(?=\d)/, '')
+  return normalized || '0'
+}
+
+function matchesSapIdentifier(value, expected) {
+  if (!value || !expected) return false
+  const left = String(value).trim()
+  const right = String(expected).trim()
+  if (!left || !right) return false
+  return left === right || normalizeSapIdentifier(left) === normalizeSapIdentifier(right)
+}
+
 function sapDate(value) {
   if (typeof value !== 'string') return null
   const match = /^\/Date\((-?\d+)(?:[-+]\d{4})?\)\/$/.exec(value)
@@ -567,9 +583,9 @@ export function filterVendorLineItems(records, filters = {}, reportingDate) {
     ) {
       return false
     }
-    if (supplierId && record.supplierId !== supplierId) return false
+    if (supplierId && !matchesSapIdentifier(record.supplierId, supplierId)) return false
     if (supplierName && !String(record.supplierName || '').toLowerCase().includes(supplierName)) return false
-    if (companyCode && record.companyCode !== companyCode) return false
+    if (companyCode && !matchesSapIdentifier(record.companyCode, companyCode)) return false
     if (currency && record.currency !== currency && record.balanceCurrency !== currency && record.transactionCurrency !== currency) {
       return false
     }

@@ -209,6 +209,52 @@ test('payment assistant refuses actions, handles Ollama failures, and uses only 
   }
 })
 
+test('live assistant explains when invoice data exists but no verified accounting item matches', async () => {
+  const previousMode = config.dataMode
+  const previousSap = { ...config.sap }
+  const previousGet = axios.get
+  config.dataMode = 'live'
+  Object.assign(config.sap, {
+    baseUrl: 'https://sap.example.test',
+    odataPath: '/API_SUPPLIERINVOICE_PROCESS_SRV',
+    username: 'test-user',
+    password: 'test-password',
+  })
+  try {
+    axios.get = async (url) => {
+      if (url.endsWith('/')) {
+        return { data: { d: { EntitySets: ['A_SupplierInvoice'] } } }
+      }
+      if (url.includes('/Items')) {
+        return { data: { d: { results: [], __count: '0' } } }
+      }
+      if (url.endsWith('A_SupplierInvoice')) {
+        return { data: { d: { results: [{ SupplierInvoice: '5100001234', FiscalYear: '2025', InvoicingParty: '0000100024', InvoiceGrossAmount: '215.50', DocumentCurrency: 'USD', SupplierInvoiceStatus: '5' }], __count: '1' } } }
+      }
+      return { data: { d: { results: [], __count: '0' } } }
+    }
+    const result = await answerPaymentQuestion('Show open items for supplier 100024', { supplierId: '100024' }, {
+      client: {
+        async post(_url, payload) {
+          return {
+            data: {
+              done: true,
+              message: { content: JSON.stringify({ answer: 'No verified open items were found.' }) },
+            },
+          }
+        },
+      },
+    })
+    assert.match(result.answer, /No matching live SAP accounting items were found/i)
+    assert.equal(result.records.length, 0)
+    assert.equal(result.matchedRecordCount, 0)
+  } finally {
+    axios.get = previousGet
+    config.dataMode = previousMode
+    Object.assign(config.sap, previousSap)
+  }
+})
+
 test('payment assistant bounds live SAP records when more than 100 match', async () => {
   const previousMode = config.dataMode
   const previousSap = { ...config.sap }
@@ -289,8 +335,8 @@ test('unknown supplier questions report the limitation instead of inventing valu
     dataMode: 'live',
   })
 
-  assert.match(answer, /No verified open items were found for supplier 999999/i)
-  assert.match(answer, /Limitation:/i)
+  assert.match(answer, /No matching live SAP accounting items were found for supplier 999999/i)
+  assert.doesNotMatch(answer, /inventing values/i)
 })
 
 test('missing or duplicated records do not inflate totals or invent missing values', () => {
