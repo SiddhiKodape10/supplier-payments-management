@@ -998,6 +998,29 @@
 
 .assistant-page-heading {
   margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.assistant-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assistant-data-chip {
+  border-color: #d9d3f2 !important;
+  background: #f6f3ff !important;
+  color: #5f4ea8 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.assistant-clear-button {
+  border-color: #dfe6f1 !important;
+  color: #51657d !important;
+  text-transform: none !important;
 }
 
 .payment-assistant-panel {

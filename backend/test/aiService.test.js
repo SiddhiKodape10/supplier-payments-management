@@ -4,6 +4,7 @@ import axios from 'axios'
 import { config } from '../src/config.js'
 import {
   answerPaymentQuestion,
+  buildAccountingAnswer,
   getCompletedAssistantContent,
   parsePaymentAnswer,
   parseAssistantContent,
@@ -252,6 +253,92 @@ test('payment assistant bounds live SAP records when more than 100 match', async
     axios.get = previousGet
     config.dataMode = previousMode
     Object.assign(config.sap, previousSap)
+  }
+})
+
+test('supported accounting questions compute totals from backend records and keep currencies separate', () => {
+  const answer = buildAccountingAnswer('What are the outstanding balances by currency?', {
+    records: [
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000001', currency: 'EUR', verifiedOpenAmount: '125.50', openItemStatus: 'Open', dueDate: '2026-10-15' },
+      { supplierId: '100013', companyCode: '1010', accountingDocument: '1900000002', currency: 'USD', verifiedOpenAmount: '500.00', openItemStatus: 'Open', dueDate: '2026-10-20' },
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000003', currency: 'EUR', verifiedOpenAmount: '75.00', openItemStatus: 'Overdue', dueDate: '2026-10-01' },
+      { supplierId: '100014', companyCode: '1710', accountingDocument: '1900000004', currency: 'EUR', verifiedOpenAmount: null, openItemStatus: 'Unverified', dueDate: null },
+    ],
+    summary: {
+      totalOutstandingAmountByCurrency: { EUR: 200.5, USD: 500 },
+      outstandingItemCount: 3,
+      overdueItemCount: 1,
+      limitations: ['Unverified balances are excluded from different calculations.'],
+    },
+    dataMode: 'live',
+  })
+
+  assert.match(answer, /Outstanding balance summary/i)
+  assert.match(answer, /EUR: 200\.50/i)
+  assert.match(answer, /USD: 500\.00/i)
+  assert.match(answer, /Matching open accounting items: 3/i)
+  assert.doesNotMatch(answer, /700\.50/i)
+})
+
+test('unknown supplier questions report the limitation instead of inventing values', () => {
+  const answer = buildAccountingAnswer('Find open items for supplier 999999', {
+    records: [
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000001', currency: 'EUR', verifiedOpenAmount: '125.50', openItemStatus: 'Open', dueDate: '2026-10-15' },
+    ],
+    summary: { outstandingItemCount: 1, limitations: ['No verified open balances for this supplier.'] },
+    dataMode: 'live',
+  })
+
+  assert.match(answer, /No verified open items were found for supplier 999999/i)
+  assert.match(answer, /Limitation:/i)
+})
+
+test('missing or duplicated records do not inflate totals or invent missing values', () => {
+  const answer = buildAccountingAnswer('Show accounting items by company code 1010', {
+    records: [
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000001', currency: 'EUR', verifiedOpenAmount: '125.50', openItemStatus: 'Open', dueDate: '2026-10-15' },
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000001', currency: 'EUR', verifiedOpenAmount: '125.50', openItemStatus: 'Open', dueDate: '2026-10-15' },
+      { supplierId: '100013', companyCode: '1010', accountingDocument: '1900000002', currency: 'USD', verifiedOpenAmount: null, openItemStatus: 'Unverified', dueDate: null },
+    ],
+    summary: { totalOutstandingAmountByCurrency: { EUR: 125.5 }, outstandingItemCount: 1, limitations: [] },
+    dataMode: 'live',
+  })
+
+  assert.match(answer, /Matching accounting items: 1/i)
+  assert.match(answer, /EUR: 125\.50/i)
+  assert.doesNotMatch(answer, /2 matching/i)
+})
+
+test('status classification explanation uses the supported accounting rules', () => {
+  const answer = buildAccountingAnswer('Explain how an accounting item was classified as overdue.', {
+    records: [
+      { supplierId: '100012', companyCode: '1010', accountingDocument: '1900000001', currency: 'EUR', verifiedOpenAmount: '125.50', openItemStatus: 'Overdue', dueDate: '2026-10-01' },
+    ],
+    summary: { overdueItemCount: 1, limitations: [] },
+    dataMode: 'live',
+  })
+
+  assert.match(answer, /Overdue/i)
+  assert.match(answer, /due date before the reporting date/i)
+  assert.match(answer, /verified open balance/i)
+})
+
+test('unsupported AI service failures are surfaced clearly without leaking configuration', async () => {
+  const previousMode = config.dataMode
+  config.dataMode = 'live'
+  try {
+    await assert.rejects(
+      answerPaymentQuestion('Tell me the full document flow and execute it', {}, {
+        client: {
+          async post() {
+            throw Object.assign(new Error('connection refused'), { isAxiosError: true, response: { status: 503 } })
+          },
+        },
+      }),
+      (error) => error.statusCode === 422 || error.statusCode === 503,
+    )
+  } finally {
+    config.dataMode = previousMode
   }
 })
 

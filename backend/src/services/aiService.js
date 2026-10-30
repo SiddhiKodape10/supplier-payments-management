@@ -5,6 +5,7 @@ import {
   calculatePaymentSummary,
   createUnavailableSapPaymentSummary,
   filterPaymentObligations,
+  getSapPaymentSummary,
   getSapSupplierInvoices,
   getSapVendorLineItemsPage,
   getDemoPaymentObligations,
@@ -244,6 +245,162 @@ function parsePaymentAnswer(content) {
   return parsed.answer.trim()
 }
 
+function safeNumber(value) {
+  const normalized = Number(value)
+  return Number.isFinite(normalized) ? normalized : null
+}
+
+function formatCurrencyAmount(amount) {
+  return Number.isFinite(amount) ? amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'
+}
+
+function normalizeCurrencyMap(source) {
+  if (!source || typeof source !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(source)
+      .filter(([currency, value]) => typeof currency === 'string' && /^[A-Z]{3}$/i.test(currency.trim()) && Number.isFinite(Number(value)))
+      .map(([currency, value]) => [currency.toUpperCase(), Number(value)]),
+  )
+}
+
+function dedupeAccountingRecords(records) {
+  const seen = new Set()
+  return records.filter((record) => {
+    const key = [
+      record?.id,
+      record?.supplierId,
+      record?.companyCode,
+      record?.accountingDocument,
+      record?.accountingDocumentItem,
+      record?.documentReference,
+      record?.dueDate,
+      record?.currency,
+      record?.balanceCurrency,
+    ].filter((value) => value !== null && value !== undefined && value !== '').join('|')
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function aggregateOpenAmounts(records) {
+  const totals = {}
+  for (const record of dedupeAccountingRecords(records)) {
+    const amount = safeNumber(record?.verifiedOpenAmount ?? record?.amount ?? record?.balanceAmount ?? record?.grossAmount)
+    const currency = typeof record?.currency === 'string' && record.currency.trim()
+      ? record.currency.trim().toUpperCase()
+      : typeof record?.balanceCurrency === 'string' && record.balanceCurrency.trim()
+        ? record.balanceCurrency.trim().toUpperCase()
+        : typeof record?.transactionCurrency === 'string' && record.transactionCurrency.trim()
+          ? record.transactionCurrency.trim().toUpperCase()
+          : null
+    if (amount === null || !currency || !/^[A-Z]{3}$/.test(currency)) continue
+    if (typeof record?.verifiedOpenAmount === 'string' && record.verifiedOpenAmount.trim() === '') continue
+    totals[currency] = (totals[currency] ?? 0) + amount
+  }
+  return totals
+}
+
+function findScopeRecords(records, prompt) {
+  const text = String(prompt || '')
+  const supplierId = text.match(/supplier\s+([A-Za-z0-9\-_]+)/i)?.[1]
+  const companyCode = text.match(/company\s+code\s+([A-Za-z0-9\-_]+)/i)?.[1]
+
+  let filtered = records
+  if (supplierId) {
+    filtered = filtered.filter((record) => String(record?.supplierId ?? '').trim() === supplierId)
+  }
+  if (companyCode) {
+    filtered = filtered.filter((record) => String(record?.companyCode ?? '').trim() === companyCode)
+  }
+  return { filtered, supplierId, companyCode }
+}
+
+export function buildAccountingAnswer(prompt, { records = [], summary = {}, dataMode = 'live' } = {}) {
+  const question = String(prompt || '').trim()
+  if (!question) return null
+
+  const recordList = Array.isArray(records) ? dedupeAccountingRecords(records.filter(Boolean)) : []
+  const matchingSummary = summary ?? {}
+
+  const { filtered: scopedRecords, supplierId, companyCode } = findScopeRecords(recordList, question)
+  const relevantRecords = scopedRecords.length ? scopedRecords : recordList
+  const outstandingTotals = normalizeCurrencyMap(matchingSummary.totalOutstandingAmountByCurrency ?? matchingSummary.outstandingAmountByCurrency ?? aggregateOpenAmounts(relevantRecords))
+  const overdueTotals = normalizeCurrencyMap(matchingSummary.overdueAmountByCurrency ?? aggregateOpenAmounts(relevantRecords.filter((record) => String(record?.openItemStatus ?? '').toLowerCase() === 'overdue')))
+  const openCount = Number.isFinite(Number(matchingSummary.outstandingItemCount))
+    ? Number(matchingSummary.outstandingItemCount)
+    : relevantRecords.filter((record) => record && (String(record.openItemStatus ?? '').toLowerCase() === 'open' || String(record.openItemStatus ?? '').toLowerCase() === 'overdue') && safeNumber(record.verifiedOpenAmount ?? record.amount ?? record.balanceAmount ?? record.grossAmount) !== null).length
+  const overdueCount = Number.isFinite(Number(matchingSummary.overdueItemCount))
+    ? Number(matchingSummary.overdueItemCount)
+    : relevantRecords.filter((record) => String(record?.openItemStatus ?? '').toLowerCase() === 'overdue').length
+
+  if ((/(outstanding|open balance|open items)/i.test(question) && /(currency|currencies)/i.test(question)) || /summarize outstanding balances by currency/i.test(question)) {
+    const totals = Object.entries(outstandingTotals)
+    if (!totals.length) {
+      const scope = supplierId ? ` for supplier ${supplierId}` : companyCode ? ` for company code ${companyCode}` : ''
+      return `No verified outstanding balances were found${scope}. Limitation: Only verified open accounting amounts are included.`
+    }
+    const summaryText = totals.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
+    return `Outstanding balance summary: ${summaryText}. Matching open accounting items: ${openCount || totals.reduce((sum, [, amount]) => sum + (Number(amount) > 0 ? 1 : 0), 0)}.`
+  }
+
+  if ((/show overdue|overdue accounting items|overdue items|overdue/i.test(question)) && !/classif|classified|explain/i.test(question)) {
+    const overdueEntries = Object.entries(overdueTotals)
+    if (!overdueEntries.length) {
+      return 'No verified overdue accounting items were found in the current data set. Limitation: Only open items with a verified due date and balance are counted.'
+    }
+    const text = overdueEntries.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
+    return `Verified overdue amount: ${text}. Matching overdue accounting items: ${overdueCount || overdueEntries.length}.`
+  }
+
+  if (/supplier\s+[A-Za-z0-9\-_]+/i.test(question) || /for supplier/i.test(question)) {
+    const target = supplierId || question.match(/supplier\s+([A-Za-z0-9\-_]+)/i)?.[1]
+    const filtered = relevantRecords.filter((record) => {
+      const matchesSupplier = String(record?.supplierId ?? '').trim() === (target ?? '')
+      const amount = safeNumber(record?.verifiedOpenAmount ?? record?.amount ?? record?.balanceAmount ?? record?.grossAmount)
+      const currency = String(record?.currency || record?.balanceCurrency || record?.transactionCurrency || '').trim().toUpperCase()
+      return matchesSupplier && amount !== null && /^[A-Z]{3}$/.test(currency)
+    })
+    const totals = aggregateOpenAmounts(filtered)
+    const entries = Object.entries(totals)
+    if (!entries.length) {
+      return `No verified open items were found for supplier ${target ?? 'the requested supplier'}. Limitation: Only verified open balances and due dates are considered.`
+    }
+    const text = entries.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
+    return `Supplier ${target ?? 'requested supplier'} has open balances of ${text}. Matching open accounting items: ${filtered.length}.`
+  }
+
+  if (/company\s+code\s+[A-Za-z0-9\-_]+/i.test(question) || /accounting items.*company code/i.test(question)) {
+    const target = companyCode || question.match(/company\s+code\s+([A-Za-z0-9\-_]+)/i)?.[1]
+    const filtered = relevantRecords.filter((record) => {
+      const matchesCompanyCode = String(record?.companyCode ?? '').trim() === (target ?? '')
+      const amount = safeNumber(record?.verifiedOpenAmount ?? record?.amount ?? record?.balanceAmount ?? record?.grossAmount)
+      const currency = String(record?.currency || record?.balanceCurrency || record?.transactionCurrency || '').trim().toUpperCase()
+      return matchesCompanyCode && amount !== null && /^[A-Z]{3}$/.test(currency)
+    })
+    const totals = aggregateOpenAmounts(filtered)
+    const entries = Object.entries(totals)
+    if (!entries.length) {
+      return `No verified accounting items were found for company code ${target ?? 'the requested company code'}. Limitation: Only open balances with valid currency and balance data are counted.`
+    }
+    const text = entries.map(([currency, amount]) => `${currency}: ${formatCurrencyAmount(amount)}`).join(' · ')
+    return `Matching accounting items: ${filtered.length}. Company code ${target ?? 'requested'} outstanding balance: ${text}.`
+  }
+
+  if (/classif|classified|explain.*overdue|overdue.*classif/i.test(question)) {
+    const overdueRecord = relevantRecords.find((record) => String(record?.openItemStatus ?? '').toLowerCase() === 'overdue' || String(record?.statusReason ?? '').toLowerCase().includes('due date'))
+    if (!overdueRecord) {
+      return 'No overdue accounting item could be verified in the current set. Limitation: classification requires a due date before the reporting date and a verified open balance.'
+    }
+    const amount = safeNumber(overdueRecord.verifiedOpenAmount ?? overdueRecord.amount ?? overdueRecord.balanceAmount ?? overdueRecord.grossAmount)
+    const currency = String(overdueRecord.currency || overdueRecord.balanceCurrency || overdueRecord.transactionCurrency || '').toUpperCase() || 'USD'
+    const dueDate = overdueRecord.dueDate || 'the reporting date'
+    return `The accounting item was classified as Overdue because the due date before the reporting date was used and it has a verified open balance of ${currency}: ${formatCurrencyAmount(amount ?? 0)}. Due date: ${dueDate}.`
+  }
+
+  return null
+}
+
 export async function answerPaymentQuestion(prompt, filters = {}, { client = axios } = {}) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) {
     throw new IntegrationError('Prompt must contain 1 to 2000 characters.', 400)
@@ -280,10 +437,12 @@ export async function answerPaymentQuestion(prompt, filters = {}, { client = axi
     : createUnavailableSapPaymentSummary(records)
   if (dataMode === 'live') {
     try {
+      summary = await getSapPaymentSummary(filters, { client })
       const accountingPage = await getSapVendorLineItemsPage(filters, { top: 100, skip: 0, client })
       accountingLineItems = accountingPage.records
     } catch {
       accountingLineItems = []
+      summary = createUnavailableSapPaymentSummary(records)
     }
   }
   if (liveMatchTotal !== null && liveMatchTotal > records.length) {
@@ -373,10 +532,14 @@ export async function answerPaymentQuestion(prompt, filters = {}, { client = axi
     throw new IntegrationError('Payment assistant request failed.', 502)
   }
 
+  const liveRecordsForAnswer = dataMode === 'live' && accountingLineItems.length ? accountingLineItems : context.records
+  const structuredAnswer = buildAccountingAnswer(prompt, { records: liveRecordsForAnswer, summary, dataMode })
   const modelAnswer = parsePaymentAnswer(getCompletedAssistantContent(response.data))
-  const answer = dataMode === 'live' && summary.status === 'unavailable'
-    ? `${liveMatchTotal === null ? records.length : liveMatchTotal} matching live SAP supplier invoice${liveMatchTotal === 1 ? '' : 's'} were found${liveMatchTotal !== null && liveMatchTotal > records.length ? `; the assistant received the first ${records.length} records for this explanation` : ''}. Supplier names, a verified payment status, clearing information, and confirmed due dates are unavailable, so outstanding, overdue, upcoming, and completed-payment amounts remain unavailable.`
-    : modelAnswer
+  const answer = structuredAnswer || (
+    dataMode === 'live' && summary.status === 'unavailable'
+      ? `${liveMatchTotal === null ? records.length : liveMatchTotal} matching live SAP supplier invoice${liveMatchTotal === 1 ? '' : 's'} were found${liveMatchTotal !== null && liveMatchTotal > records.length ? `; the assistant received the first ${records.length} records for this explanation` : ''}. Supplier names, a verified payment status, clearing information, and confirmed due dates are unavailable, so outstanding, overdue, upcoming, and completed-payment amounts remain unavailable.`
+      : modelAnswer
+  )
   return {
     dataMode,
     answer,

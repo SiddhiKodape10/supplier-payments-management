@@ -49,19 +49,19 @@ import {
 } from './services/api'
 import './App.css'
 
-type Page = 'dashboard' | 'search' | 'assistant'
+type Page = 'dashboard' | 'assistant'
 type SortKey = 'supplierId' | 'companyCode' | 'supplierName' | 'documentReference' | 'documentDate' | 'postingDate' | 'amount' | 'currency' | 'dueDate' | 'paymentStatus' | 'invoiceProcessingStatus'
 type SortDirection = 'asc' | 'desc'
 
 const PAGE_SIZE = 25
 const initialFilters: PaymentFilters = {}
 const suggestions = [
-  'How many live supplier invoices were retrieved?',
-  'Summarize invoice gross amount by currency.',
-  'List invoices for a supplier ID.',
-  'Summarize invoices by company code.',
-  'Explain invoice document statuses.',
-  'What payment information is not included in this SAP source?',
+  'Summarize outstanding supplier balances.',
+  'Show overdue accounting items.',
+  'Find open items for supplier 100012.',
+  'Show company code 1010 exposure.',
+  'Summarize outstanding balances by currency.',
+  'Explain why an accounting item was classified as overdue.',
 ]
 
 interface AssistantMessage {
@@ -353,7 +353,7 @@ function App() {
   }, [appliedFilters, pageIndex, page])
 
   useEffect(() => {
-    if (page !== 'dashboard' && page !== 'search') return
+    if (page !== 'dashboard') return
     const timer = window.setTimeout(() => void loadPayments(), 0)
     return () => window.clearTimeout(timer)
   }, [page, loadPayments])
@@ -459,6 +459,11 @@ function App() {
     }
   }
 
+  const clearChat = () => {
+    setMessages([])
+    setAssistantError('')
+  }
+
   const choosePage = (next: Page) => setPage(next)
 
   return (
@@ -537,22 +542,19 @@ function App() {
             <Button aria-current={page === 'dashboard' ? 'page' : undefined} onClick={() => choosePage('dashboard')}>
               Dashboard
             </Button>
-            <Button aria-current={page === 'search' ? 'page' : undefined} onClick={() => choosePage('search')}>
-              Search Payments
-            </Button>
             <Button aria-current={page === 'assistant' ? 'page' : undefined} onClick={() => choosePage('assistant')}>
               <AutoAwesomeOutlinedIcon fontSize="small" /> AI Payment Assistant
             </Button>
           </Box>
         </Paper>
 
-        {page !== 'assistant' && (
+        {page === 'dashboard' && (
           <FilterPanel
             filters={draftFilters}
             onChange={updateDraft}
             onApply={applyFilters}
             onClear={clearFilters}
-            searchPage={page === 'search'}
+            searchPage={false}
             liveMode={health?.dataMode === 'live'}
           />
         )}
@@ -580,25 +582,6 @@ function App() {
           />
         )}
 
-        {page === 'search' && (
-          <SearchPage
-            records={sortedRecords}
-            dataMode={health?.dataMode}
-            total={total}
-            loading={loading}
-            error={dataError}
-            pageIndex={pageIndex}
-            sortKey={sortKey}
-            sortDirection={sortDirection}
-            onSort={(key) => {
-              setSortDirection(sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc')
-              setSortKey(key)
-            }}
-            onPageChange={setPageIndex}
-            onDetails={showDetails}
-          />
-        )}
-
         {page === 'assistant' && (
           <AssistantPage
             question={question}
@@ -609,6 +592,7 @@ function App() {
             onQuestionChange={setQuestion}
             onSubmit={submitQuestion}
             onSuggestion={setQuestion}
+            onClearChat={clearChat}
             onDetails={showDetails}
           />
         )}
@@ -963,52 +947,6 @@ function DashboardPage({
   )
 }
 
-function SearchPage({
-  records,
-  dataMode,
-  total,
-  loading,
-  error,
-  pageIndex,
-  sortKey,
-  sortDirection,
-  onSort,
-  onPageChange,
-  onDetails,
-}: {
-  records: PaymentObligation[]
-  dataMode?: string
-  total: number
-  loading: boolean
-  error: string
-  pageIndex: number
-  sortKey: SortKey
-  sortDirection: SortDirection
-  onSort: (key: SortKey) => void
-  onPageChange: (page: number) => void
-  onDetails: (record: PaymentObligation) => void
-}) {
-  return (
-    <PaymentRecords
-      title={dataMode === 'live' ? 'Search SAP supplier invoices' : 'Search payment obligations'}
-      dataMode={dataMode}
-      description={dataMode === 'live'
-        ? 'Search supplier IDs and verified invoice or document reference fields.'
-        : 'Search supplier IDs and names, document references, invoice references, and payment references.'}
-      records={records}
-      total={total}
-      loading={loading}
-      error={error}
-      pageIndex={pageIndex}
-      sortKey={sortKey}
-      sortDirection={sortDirection}
-      onSort={onSort}
-      onPageChange={onPageChange}
-      onDetails={onDetails}
-    />
-  )
-}
-
 function PaymentRecords({
   title,
   description,
@@ -1268,6 +1206,7 @@ function AssistantPage({
   onQuestionChange,
   onSubmit,
   onSuggestion,
+  onClearChat,
   onDetails,
 }: {
   question: string
@@ -1278,33 +1217,52 @@ function AssistantPage({
   onQuestionChange: (value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onSuggestion: (value: string) => void
+  onClearChat: () => void
   onDetails: (record: PaymentObligation) => void
 }) {
+  const activeDataLabel = dataMode === 'live' ? 'Live SAP Data' : 'Demo Data'
+
   return (
     <Box>
       <Box className="section-heading assistant-page-heading">
         <Box>
           <Typography variant="h2">AI Payment Assistant</Typography>
           <Typography className="section-description">
-            {dataMode === 'live'
-              ? 'Ask questions about backend-retrieved SAP supplier invoices; payment status and outstanding balances are not verified.'
-              : 'Ask questions about backend-filtered payment obligation records.'}
+            Ask questions about supplier balances and accounting items using available SAP data.
           </Typography>
         </Box>
-        <Chip icon={<AutoAwesomeOutlinedIcon />} label="Local Ollama · llama3.2" size="small" className="assistant-chip" />
+        <Box className="assistant-toolbar">
+          <Chip
+            icon={<AutoAwesomeOutlinedIcon />}
+            label={activeDataLabel}
+            size="small"
+            className="assistant-data-chip"
+            variant="outlined"
+          />
+          <Button
+            type="button"
+            size="small"
+            variant="outlined"
+            onClick={onClearChat}
+            className="assistant-clear-button"
+            disabled={asking}
+          >
+            Clear Chat
+          </Button>
+        </Box>
       </Box>
       {dataMode === 'demo' && (
         <Alert severity="warning" className="inline-alert">
-          The assistant is answering from fictional demo records, not verified SAP data. Its generated explanation is not authoritative.
+          The assistant is answering from fictional demo records and is not using verified SAP accounting values.
         </Alert>
       )}
       {dataMode === 'live' && (
         <Alert severity="warning" className="inline-alert">
-          Live records are SAP invoices, not verified payment obligations. The assistant cannot verify paid, unpaid, overdue, or due-date claims from this source.
+          Live records are SAP accounting items, not verified payment obligations. The assistant must not infer completed payment status from invoice or clearing fields alone.
         </Alert>
       )}
       <Alert severity="info" className="inline-alert">
-        Read-only assistant. It cannot create, approve, post, or execute payments. Missing fields are outside the current SAP invoice source.
+        Read-only assistant. It cannot create, approve, post, or execute payments. Missing fields remain unavailable unless they are explicitly supplied by SAP.
       </Alert>
       <Paper className="assistant-panel payment-assistant-panel" elevation={0}>
         <Box className="assistant-examples" aria-label="Suggested questions">
@@ -1330,10 +1288,10 @@ function AssistantPage({
                     <Chip size="small" label="Based on demo sample records" className="data-mode-chip assistant-source-chip" />
                   )}
                   {message.result.dataMode === 'live' && (
-                    <Chip size="small" label="Based on live SAP invoices" className="assistant-source-chip" variant="outlined" />
+                    <Chip size="small" label="Based on live SAP data" className="assistant-source-chip" variant="outlined" />
                   )}
                   <Typography className="assistant-evidence-count">
-                    {message.result.matchedRecordCount} matching backend record(s)
+                    Showing {Math.min(message.result.records.length, 5)} of {message.result.matchedRecordCount} matching {message.result.dataMode === 'live' ? 'live SAP accounting records' : 'demo records'}
                   </Typography>
                   {message.result.records.slice(0, 5).map((record) => (
                     <Button
@@ -1363,7 +1321,7 @@ function AssistantPage({
             minRows={2}
             maxRows={5}
             label="Your question"
-            placeholder="Ask about live supplier invoices, totals, suppliers, or document status..."
+            placeholder="Ask about supplier balances, overdue accounting items, or company-level totals..."
             value={question}
             onChange={(event) => onQuestionChange(event.target.value)}
             required
@@ -1371,7 +1329,7 @@ function AssistantPage({
             slotProps={{ htmlInput: { maxLength: 2000 } }}
           />
           <Button type="submit" variant="contained" disableElevation disabled={asking || !question.trim()}>
-            {asking ? <CircularProgress size={20} color="inherit" /> : 'Ask assistant'}
+            {asking ? <CircularProgress size={20} color="inherit" /> : 'Send'}
           </Button>
         </Box>
       </Paper>
